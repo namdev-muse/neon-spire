@@ -1,4 +1,4 @@
-// Neon Spire v0.2.0 — Three.js renderer + menus + game feel.
+// Neon Spire v0.2.1 — Three.js renderer + menus + game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns the
 // 3D scene, the screen stack, input, Web Audio SFX and the feel tiers.
 // The climber swings on the climb-face plane (x = lateral, y = height,
@@ -533,6 +533,10 @@ function startClimb(id, viaParam = false) {
 function endClimb(won) {
   const run = state.run;
   if (!run) return;
+  // Clear transient UI state on run end (Talon lesson): a leftover
+  // toast must not linger over the complete / game-over panel.
+  toastEl.classList.remove('show');
+  state.toastT = 0;
   if (won) {
     const prev = save.best[run.climb.id];
     recordBest(save, run.climb.id, { won: true, score: run.score, time: run.time, falls: run.falls, orbs: run.orbs, par: run.climb.par });
@@ -553,7 +557,7 @@ function endClimb(won) {
   } else {
     state.phase = 'gameover';
     state.gameoverShownAt = performance.now();
-    $('gameover-detail').textContent = `Reached ${Math.floor(run.maxHeight)}m of ${run.climb.height}m — ${run.falls} falls`;
+    $('gameover-detail').textContent = `Reached ${Math.max(0, Math.floor(run.maxHeight))}m of ${run.climb.height}m — ${run.falls} falls`;
     const best = save.best[run.climb.id];
     $('gameover-best').textContent = best ? `Best ${best.score} pts` : 'No clear yet — the spire waits';
     hideAllScreens();
@@ -611,7 +615,11 @@ window.addEventListener('keydown', (e) => {
     if (state.phase === 'playing') pauseGame(); else resumeGame();
   }
   if (e.code === 'KeyM') toggleMute();
-  if (e.code === 'KeyR' && state.phase === 'playing') startClimb(state.climbId);
+  // Retry / restart from inside a climb is not a new entry: the lock
+  // gates menu entry only. Without this, Try Again is dead after losing
+  // a deep-linked (?climb=N) locked climb — the retry re-checks the
+  // lock the deep link bypassed, and the game-over panel just stays.
+  if (e.code === 'KeyR' && state.phase === 'playing') startClimb(state.climbId, true);
   if (e.code === 'Escape') {
     if (state.phase === 'playing') pauseGame();
     else if (screenStack.length > 1) closeTopScreen();
@@ -691,15 +699,15 @@ $('btn-mute-hud').addEventListener('click', toggleMute);
 $('btn-mute-pause').addEventListener('click', toggleMute);
 $('btn-pause').addEventListener('click', pauseGame);
 $('btn-resume').addEventListener('click', resumeGame);
-$('btn-restart').addEventListener('click', () => { closeScreen('pause'); startClimb(state.climbId); });
+$('btn-restart').addEventListener('click', () => { closeScreen('pause'); startClimb(state.climbId, true); });
 $('btn-quit').addEventListener('click', quitToMenu);
 $('btn-next').addEventListener('click', () => {
   if (state.climbId < CLIMBS.length) startClimb(state.climbId + 1);
   else quitToMenu();
 });
-$('btn-replay').addEventListener('click', () => startClimb(state.climbId));
+$('btn-replay').addEventListener('click', () => startClimb(state.climbId, true));
 $('btn-menu-complete').addEventListener('click', quitToMenu);
-$('btn-retry').addEventListener('click', () => startClimb(state.climbId));
+$('btn-retry').addEventListener('click', () => startClimb(state.climbId, true));
 $('btn-menu-over').addEventListener('click', quitToMenu);
 
 // Settings bindings.

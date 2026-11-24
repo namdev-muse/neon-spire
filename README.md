@@ -51,7 +51,7 @@ You hang from a grapple rope on the face of a towering neon spire. There is no c
 
 ## Version
 
-v0.2.0 (M2 climb craft). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
+v0.2.1 (M2 hotfix: deep-link retry). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
 
 ## Known issues (M2)
 

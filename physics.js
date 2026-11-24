@@ -1,4 +1,4 @@
-// Neon Spire v0.2.0 — pure simulation core (no DOM, no Three.js).
+// Neon Spire v0.2.1 — pure simulation core (no DOM, no Three.js).
 // A 3D neon grapple-climb ascender: the climber ascends a towering spire
 // by latching anchor rings, pumping the pendulum swing, and releasing at
 // the right moment to fly up and latch the next higher ring. The swing
@@ -23,7 +23,7 @@
 // Deterministic: every climb is hand-built from a fixed ring list, and
 // the fixed-step simulation gives identical results for identical inputs.
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.2.1';
 export const DT = 1 / 60;
 export const GRAVITY = 18;
 export const GRAPPLE_RANGE = 12;
