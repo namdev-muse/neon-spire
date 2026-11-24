@@ -1,4 +1,4 @@
-// Neon Spire v0.3.0 — Three.js renderer + menus + game feel.
+// Neon Spire v0.4.0 — Three.js renderer + menus + game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns the
 // 3D scene, the screen stack, input, Web Audio SFX and the feel tiers.
 // The climber swings on the climb-face plane (x = lateral, y = height,
@@ -10,6 +10,7 @@ import {
   VERSION, DT, CLIMBS, climbById, createRun, startRun, stepRun,
   decisionPolicy, nextRing, nextRingIndex, swingSpeed,
   defaultSave, serializeSave, parseSave, recordBest, isClimbUnlocked, rankFor,
+  createEndlessRun, recordEndlessBest, RANK_ORDER,
   FEEDBACK, FACE_Z, swingEnergy,
 } from './physics.js';
 
@@ -59,6 +60,8 @@ const state = {
   highContrast: false,
   completeShownAt: 0,
   gameoverShownAt: 0,
+  endless: false, // an Endless Ascent run is in progress
+  endlessSeed: 0,
 };
 const screenStack = []; // screen ids, top = last
 
@@ -391,17 +394,21 @@ function buildClimbScene(climb) {
       climbGroup.add(outer);
     }
   });
-  // Summit beacon.
-  const summit = climb.rings[climb.rings.length - 1];
-  summitBeacon = new THREE.Mesh(
-    new THREE.OctahedronGeometry(1.1),
-    new THREE.MeshStandardMaterial({ color: 0xffd75e, emissive: 0xffd75e, emissiveIntensity: 2.2 }),
-  );
-  summitBeacon.position.set(summit.x, summit.y + 2.4, summit.z);
-  climbGroup.add(summitBeacon);
-  const beaconLight = new THREE.PointLight(0xffd75e, 40, 30);
-  beaconLight.position.copy(summitBeacon.position);
-  climbGroup.add(beaconLight);
+  // Summit beacon — hand-crafted climbs only. An endless climb has
+  // no summit ring, so there is no beacon to light.
+  summitBeacon = null;
+  if (!climb.endless) {
+    const summit = climb.rings[climb.rings.length - 1];
+    summitBeacon = new THREE.Mesh(
+      new THREE.OctahedronGeometry(1.1),
+      new THREE.MeshStandardMaterial({ color: 0xffd75e, emissive: 0xffd75e, emissiveIntensity: 2.2 }),
+    );
+    summitBeacon.position.set(summit.x, summit.y + 2.4, summit.z);
+    climbGroup.add(summitBeacon);
+    const beaconLight = new THREE.PointLight(0xffd75e, 40, 30);
+    beaconLight.position.copy(summitBeacon.position);
+    climbGroup.add(beaconLight);
+  }
   // Orbs.
   climb.orbs.forEach((o) => {
     const m = new THREE.Mesh(
@@ -481,6 +488,7 @@ function hideAllScreens() {
 function showMenu() {
   state.phase = 'menu';
   state.run = null;
+  state.endless = false;
   state.autopilot = false;
   state.demoRun = createRun(CLIMBS[0]);
   buildClimbScene(CLIMBS[0]);
@@ -504,7 +512,7 @@ function renderClimbSelect() {
     b.disabled = !unlocked;
     b.innerHTML = `<span class="tc-name">${c.id}. ${c.name}</span>` +
       `<span class="tc-meta">${unlocked ? `Par ${c.par}s · ${c.height}m` : 'Locked — clear the previous climb'}</span>` +
-      (best ? `<span class="tc-best">Best ${best.score} pts</span>` : '');
+      (best ? `<span class="tc-best">Best ${best.score} pts${best.rank ? ` <span class="tc-rank rank-${best.rank}">${best.rank}</span>` : ''}</span>` : '');
     b.addEventListener('click', () => {
       ensureAudio(); playSfx('tick');
       state.climbId = c.id;
@@ -518,9 +526,13 @@ function renderClimbSelect() {
 }
 function updateMenuBest() {
   const done = Object.keys(save.best).length;
+  const sCount = Object.values(save.best).filter((b) => b.rank === 'S').length;
   $('menu-best').textContent = done > 0
-    ? `${done} climb${done > 1 ? 's' : ''} cleared — best score ${Math.max(...Object.values(save.best).map((b) => b.score))} pts`
+    ? `${done} climb${done > 1 ? 's' : ''} cleared — best score ${Math.max(...Object.values(save.best).map((b) => b.score))} pts${sCount > 0 ? ` · ${sCount} S-rank${sCount > 1 ? 's' : ''}` : ''}`
     : `${CLIMBS.length} climbs await. The first ring is right above you.`;
+  $('menu-endless-best').textContent = save.endlessBest
+    ? `Endless best: ${save.endlessBest.height}m`
+    : 'Endless Ascent — no run yet';
   $('menu-hint').textContent = `Climb ${state.climbId} selected — press Play.`;
 }
 function fmtTime(t) {
@@ -532,14 +544,21 @@ function updateHUD() {
   const run = state.run;
   if (!run) return;
   const c = run.climb;
-  $('hud-climb').textContent = `Climb ${c.id} — ${c.name}`;
+  const endless = !!c.endless;
+  $('hud-climb').textContent = endless ? 'Endless Ascent' : `Climb ${c.id} — ${c.name}`;
   $('hud-time').textContent = fmtTime(run.time);
-  $('hud-height').textContent = `Height ${Math.max(0, Math.floor(run.maxHeight))}m / ${c.height}m`;
+  $('hud-height').textContent = endless
+    ? `Height ${Math.max(0, Math.floor(run.maxHeight))}m`
+    : `Height ${Math.max(0, Math.floor(run.maxHeight))}m / ${c.height}m`;
   $('hud-score').textContent = `Score ${run.score}`;
   $('hud-orbs').textContent = `Orbs ${run.orbs}/${c.orbs.length}`;
   $('hud-falls').textContent = `Falls ${run.falls}/${5}`;
-  const best = save.best[c.id];
-  $('hud-best').textContent = best ? `Best ${best.score}` : 'Best —';
+  if (endless) {
+    $('hud-best').textContent = save.endlessBest ? `Best ${save.endlessBest.height}m` : 'Best —';
+  } else {
+    const best = save.best[c.id];
+    $('hud-best').textContent = best ? `Best ${best.score}` : 'Best —';
+  }
   // Swing meter: current swing energy, 0..1. No marker, no cue — just
   // how much swing you are carrying right now.
   const energy = swingEnergy(run);
@@ -591,18 +610,35 @@ function activeRun() {
 }
 
 // ---------------------------------------------------------------- flow
-function startClimb(id, viaParam = false) {
-  const climb = climbById(id);
-  if (!climb) return;
-  if (!viaParam && !isClimbUnlocked(save, climb.id)) {
-    playSfx('denied');
-    showToast('Clear the previous climb to unlock this one');
-    return;
-  }
+// Today's Endless Ascent seed: the local date as YYYYMMDD, so every
+// player climbs the same seeded route on the same day.
+function todaySeed() {
+  const d = new Date();
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+// Record the best height of the active endless run, if any. Called on
+// run end and on quit-to-menu, so a height is never lost because the
+// player left mid-run. recordEndlessBest keeps the max, so calling it
+// twice for the same run is harmless.
+function bankEndlessBest() {
+  const run = state.run;
+  if (!run || !run.climb.endless) return;
+  recordEndlessBest(save, {
+    maxHeight: run.maxHeight,
+    score: run.score,
+    seed: run.climb.seed,
+  });
+  persistSave();
+}
+
+// The shared start-of-run path: reset every feel timer, build the
+// climb scene, show the HUD. startClimb and startEndless differ only
+// in which run they build.
+function beginRun(run, toastText, srText) {
   ensureAudio();
   startMusic();
-  state.climbId = climb.id;
-  state.run = startRun(climb.id);
+  state.run = run;
   state.phase = 'playing';
   state.autopilot = false;
   state.trauma = 0;
@@ -614,13 +650,45 @@ function startClimb(id, viaParam = false) {
   state.camSnapT = 0;
   state.pumpTicks = 0;
   state.lastPumpSign = 0;
-  buildClimbScene(climb);
+  buildClimbScene(run.climb);
   hideAllScreens();
   hudEl.classList.remove('hidden');
   if (isTouchDevice()) $('touch-controls').classList.remove('hidden');
   updateHUD();
-  showToast(`${climb.name} — ${climb.hint}`, 2600);
-  srStatus.textContent = `Climb ${climb.id}, ${climb.name}. Hold Space to grapple, pump with A and D, release at the top of the arc.`;
+  showToast(toastText, 2600);
+  srStatus.textContent = srText;
+}
+function startClimb(id, viaParam = false) {
+  const climb = climbById(id);
+  if (!climb) return;
+  if (!viaParam && !isClimbUnlocked(save, climb.id)) {
+    playSfx('denied');
+    showToast('Clear the previous climb to unlock this one');
+    return;
+  }
+  state.climbId = climb.id;
+  state.endless = false;
+  beginRun(
+    startRun(climb.id),
+    `${climb.name} — ${climb.hint}`,
+    `Climb ${climb.id}, ${climb.name}. Hold Space to grapple, pump with A and D, release at the top of the arc.`,
+  );
+}
+function startEndless(seed) {
+  const s = Number.isInteger(seed) ? seed : todaySeed();
+  state.endless = true;
+  state.endlessSeed = s;
+  beginRun(
+    createEndlessRun(s),
+    'Endless Ascent — climb as high as you can. 5 falls ends the run.',
+    'Endless Ascent. Hold Space to grapple, pump with A and D, release at the top of the arc. Climb as high as you can — 5 falls ends the run.',
+  );
+}
+// Restart whatever is currently being played: the same endless seed,
+// or the same climb.
+function restartRun() {
+  if (state.endless) startEndless(state.endlessSeed);
+  else startClimb(state.climbId, true);
 }
 function endClimb(won) {
   const run = state.run;
@@ -631,6 +699,8 @@ function endClimb(won) {
   state.toastT = 0;
   if (won) {
     const prev = save.best[run.climb.id];
+    const prevRank = prev ? prev.rank : null;
+    const rank = rankFor({ won: true, falls: run.falls, time: run.time, par: run.climb.par });
     recordBest(save, run.climb.id, { won: true, score: run.score, time: run.time, falls: run.falls, orbs: run.orbs, par: run.climb.par });
     persistSave();
     state.phase = 'complete';
@@ -639,7 +709,12 @@ function endClimb(won) {
     $('complete-detail').textContent = `${run.climb.name} cleared in ${fmtTime(run.time)} with ${run.falls} fall${run.falls === 1 ? '' : 's'} · ${run.orbs}/${run.climb.orbs.length} orbs`;
     const best = save.best[run.climb.id];
     $('complete-best').textContent = best ? `Best ${best.score} pts` : '';
-    $('complete-rank').textContent = `Rank ${rankFor({ won: true, falls: run.falls, time: run.time, par: run.climb.par })} — S needs no falls under par, A under par`;
+    const bestRank = best ? best.rank : null;
+    const improvedRank = !!rank && (!prevRank || RANK_ORDER[rank] > RANK_ORDER[prevRank]);
+    let rankText = `Rank ${rank} — S needs no falls under par, A under par`;
+    if (bestRank) rankText += ` · Best rank ${bestRank}`;
+    if (improvedRank) rankText += ' · New best rank!';
+    $('complete-rank').textContent = rankText;
     $('complete-orbs').textContent = run.climb.id < CLIMBS.length ? 'Next climb unlocked' : 'All climbs cleared — you own the spire';
     $('btn-next').textContent = run.climb.id < CLIMBS.length ? 'Next Climb' : 'Main Menu';
     hideAllScreens();
@@ -649,9 +724,18 @@ function endClimb(won) {
   } else {
     state.phase = 'gameover';
     state.gameoverShownAt = performance.now();
-    $('gameover-detail').textContent = `Reached ${Math.max(0, Math.floor(run.maxHeight))}m of ${run.climb.height}m — ${run.falls} falls`;
-    const best = save.best[run.climb.id];
-    $('gameover-best').textContent = best ? `Best ${best.score} pts` : 'No clear yet — the spire waits';
+    if (run.climb.endless) {
+      const prevBest = save.endlessBest;
+      bankEndlessBest();
+      const h = Math.max(0, Math.floor(run.maxHeight));
+      const isNewBest = h > 0 && (!prevBest || h > prevBest.height);
+      $('gameover-detail').textContent = `Endless Ascent — reached ${h}m · ${run.falls} falls${isNewBest ? ' · New best!' : ''}`;
+      $('gameover-best').textContent = save.endlessBest ? `Best ${save.endlessBest.height}m` : '';
+    } else {
+      $('gameover-detail').textContent = `Reached ${Math.max(0, Math.floor(run.maxHeight))}m of ${run.climb.height}m — ${run.falls} falls`;
+      const best = save.best[run.climb.id];
+      $('gameover-best').textContent = best ? `Best ${best.score} pts` : 'No clear yet — the spire waits';
+    }
     hideAllScreens();
     hudEl.classList.add('hidden');
     $('touch-controls').classList.add('hidden');
@@ -671,6 +755,8 @@ function resumeGame() {
 }
 function quitToMenu() {
   toastEl.classList.remove('show');
+  // Banking first: quitting mid-run still keeps the endless height.
+  bankEndlessBest();
   // Snap every feel effect back to its exact rest value (skill rule):
   // the menu must never inherit shake, FOV punch, hit-stop or slow-mo
   // from the run that just ended.
@@ -714,7 +800,7 @@ window.addEventListener('keydown', (e) => {
   // gates menu entry only. Without this, Try Again is dead after losing
   // a deep-linked (?climb=N) locked climb — the retry re-checks the
   // lock the deep link bypassed, and the game-over panel just stays.
-  if (e.code === 'KeyR' && state.phase === 'playing') startClimb(state.climbId, true);
+  if (e.code === 'KeyR' && state.phase === 'playing') restartRun();
   if (e.code === 'Escape') {
     if (state.phase === 'playing') pauseGame();
     else if (screenStack.length > 1) closeTopScreen();
@@ -785,6 +871,7 @@ function updateMuteLabels() {
   $('btn-mute-pause').textContent = label;
 }
 $('btn-play').addEventListener('click', () => startClimb(state.climbId));
+$('btn-endless').addEventListener('click', () => startEndless());
 $('btn-howto').addEventListener('click', () => openScreen('howto'));
 $('btn-howto-close').addEventListener('click', () => closeScreen('howto'));
 $('btn-settings').addEventListener('click', () => openScreen('settings'));
@@ -794,15 +881,15 @@ $('btn-mute-hud').addEventListener('click', toggleMute);
 $('btn-mute-pause').addEventListener('click', toggleMute);
 $('btn-pause').addEventListener('click', pauseGame);
 $('btn-resume').addEventListener('click', resumeGame);
-$('btn-restart').addEventListener('click', () => { closeScreen('pause'); startClimb(state.climbId, true); });
+$('btn-restart').addEventListener('click', () => { closeScreen('pause'); restartRun(); });
 $('btn-quit').addEventListener('click', quitToMenu);
 $('btn-next').addEventListener('click', () => {
   if (state.climbId < CLIMBS.length) startClimb(state.climbId + 1);
   else quitToMenu();
 });
-$('btn-replay').addEventListener('click', () => startClimb(state.climbId, true));
+$('btn-replay').addEventListener('click', restartRun);
 $('btn-menu-complete').addEventListener('click', quitToMenu);
-$('btn-retry').addEventListener('click', () => startClimb(state.climbId, true));
+$('btn-retry').addEventListener('click', restartRun);
 $('btn-menu-over').addEventListener('click', quitToMenu);
 
 // Settings bindings.
@@ -1064,8 +1151,11 @@ function info() {
   return {
     version: VERSION,
     phase: state.phase,
-    climbId: state.climbId,
+    climbId: run ? run.climb.id : state.climbId,
     climbName: run ? run.climb.name : null,
+    endless: run ? !!run.climb.endless : false,
+    endlessSeed: run && run.climb.endless ? run.climb.seed : null,
+    endlessBest: save.endlessBest,
     pos: run ? { x: +run.pos.x.toFixed(2), y: +run.pos.y.toFixed(2) } : null,
     vel: run ? { x: +run.vel.x.toFixed(2), y: +run.vel.y.toFixed(2) } : null,
     attached: run ? run.attached : null,
@@ -1101,9 +1191,11 @@ window.__spire = {
   get phase() { return state.phase; },
   get state() { return state; },
   get save() { return save; },
+  get endlessBest() { return save.endlessBest; },
   climbs: CLIMBS,
   info,
   startClimb: (id) => startClimb(id, true),
+  startEndless: (seed) => startEndless(seed),
   autopilot(on) { state.autopilot = !!on; },
   pause: pauseGame,
   resume: resumeGame,
@@ -1123,9 +1215,19 @@ if (!webglOK || !renderer) {
   $('webgl-error').classList.remove('hidden');
 } else {
   showMenu();
-  const climbParam = Number(params.get('climb'));
-  if (climbParam >= 1 && climbParam <= CLIMBS.length) {
-    startClimb(climbParam, true);
+  const endlessParam = params.get('endless');
+  if (endlessParam !== null) {
+    // ?endless=1 starts today's seeded climb; ?endless=<digits> starts
+    // that seed. Same public unlock/seed path as ?climb=.
+    const seed = endlessParam === '1' || !/^\d+$/.test(endlessParam)
+      ? todaySeed()
+      : parseInt(endlessParam, 10);
+    startEndless(seed);
+  } else {
+    const climbParam = Number(params.get('climb'));
+    if (climbParam >= 1 && climbParam <= CLIMBS.length) {
+      startClimb(climbParam, true);
+    }
   }
   requestAnimationFrame(frame);
 }

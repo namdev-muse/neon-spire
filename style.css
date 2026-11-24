@@ -139,6 +139,14 @@ h3 { color: var(--gold); margin: 14px 0 6px; letter-spacing: 0.08em; }
 .track-card .tc-name { display: block; font-weight: 700; }
 .track-card .tc-meta { display: block; font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
 .track-card .tc-best { display: block; font-size: 0.85rem; color: var(--gold); margin-top: 2px; }
+.tc-rank {
+  display: inline-block; font-weight: 800; font-size: 0.85rem;
+  border: 1px solid currentColor; border-radius: 6px;
+  padding: 0 5px; margin-left: 4px; line-height: 1.4;
+}
+.tc-rank.rank-S { color: var(--gold); text-shadow: 0 0 8px rgba(255, 215, 94, 0.7); }
+.tc-rank.rank-A { color: var(--cyan); }
+.tc-rank.rank-B { color: var(--violet); }
 
 /* ---------- HUD ---------- */
 #hud {

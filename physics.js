@@ -1,4 +1,4 @@
-// Neon Spire v0.3.0 — pure simulation core (no DOM, no Three.js).
+// Neon Spire v0.4.0 — pure simulation core (no DOM, no Three.js).
 // A 3D neon grapple-climb ascender: the climber ascends a towering spire
 // by latching anchor rings, pumping the pendulum swing, and releasing at
 // the right moment to fly up and latch the next higher ring. The swing
@@ -23,7 +23,7 @@
 // Deterministic: every climb is hand-built from a fixed ring list, and
 // the fixed-step simulation gives identical results for identical inputs.
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const DT = 1 / 60;
 export const GRAVITY = 18;
 export const GRAPPLE_RANGE = 12;
@@ -449,6 +449,57 @@ export function climbById(id) {
   return CLIMBS.find((c) => c.id === id) || null;
 }
 
+// ---------------------------------------------------------------- endless
+// Endless Ascent: a seeded, scaling, never-ending climb. Deterministic
+// per seed (mulberry32): the same seed always builds the same rings.
+// ~120 rings from ring(0, 2); vertical gaps grow with height (~9.5m
+// low, ~11.5m high) and lateral offsets alternate ±(3–6)m, growing
+// slightly with height — the same gap geometry the decision bot clears
+// on the hand-crafted climbs, so no physics retuning is needed. A
+// checkpoint ring every 7–9 rings; orbs every ~3 rings, offset from
+// the ring line. There is NO summit ring: an endless climb never wins,
+// it only ends on 5 falls (or on the clock in a simulation).
+export const ENDLESS_RINGS = 120;
+export function generateEndlessClimb(seed) {
+  const rng = mulberry32(seed);
+  const rings = [ring(0, 2, { checkpoint: true })];
+  const orbs = [];
+  let y = 2;
+  let sign = 1;
+  let nextCheckpoint = 7 + Math.floor(rng() * 3); // ring index of the next checkpoint
+  for (let i = 1; i < ENDLESS_RINGS; i++) {
+    const t = i / (ENDLESS_RINGS - 1); // 0 low, 1 high
+    const gap = 9.5 + 1.8 * t + rng() * 0.6;
+    y += gap;
+    const mag = 3 + rng() * 2.5 + t * 1;
+    const x = sign * mag;
+    sign = -sign;
+    const checkpoint = i === nextCheckpoint;
+    if (checkpoint) nextCheckpoint = i + 7 + Math.floor(rng() * 3);
+    rings.push(ring(+x.toFixed(2), +y.toFixed(2), { checkpoint }));
+    if (i % 3 === 0) {
+      const ox = x + (rng() < 0.5 ? -1 : 1) * (4 + rng() * 2);
+      orbs.push({ x: +ox.toFixed(2), y: +(y - gap * 0.5).toFixed(2) });
+    }
+  }
+  return {
+    id: 0,
+    name: 'Endless Ascent',
+    accent: '#22e6ff',
+    accentName: 'cyan',
+    par: null,
+    height: +y.toFixed(2),
+    endless: true,
+    seed,
+    rings,
+    orbs,
+  };
+}
+
+export function createEndlessRun(seed) {
+  return createRun(generateEndlessClimb(seed));
+}
+
 export function climbThreat(c) {
   // Rough difficulty measure: height + lateral spread + gap size.
   const gaps = [];
@@ -804,12 +855,52 @@ export function simulateRun(climb, policy, maxSeconds = 400) {
   };
 }
 
+export function simulateEndless(seed, policy, maxSeconds = 400) {
+  const climb = generateEndlessClimb(seed);
+  const run = createRun(climb);
+  const maxSteps = Math.floor(maxSeconds / DT);
+  let steps = 0;
+  // Random policy needs a stable input cadence: re-roll every 15 steps.
+  const rng = mulberry32(1337 + (seed >>> 0));
+  let cached = policy === 'random' ? randomPolicy(rng) : null;
+  while (run.phase === 'climbing' && steps < maxSteps) {
+    let input;
+    if (policy === 'none') input = noInputPolicy();
+    else if (policy === 'hold') input = holdPolicy();
+    else if (policy === 'random') {
+      if (steps % 15 === 0) cached = randomPolicy(rng);
+      input = cached;
+    } else if (policy === 'decision') input = decisionPolicy(run);
+    else throw new Error('unknown policy: ' + policy);
+    stepRun(run, input);
+    steps++;
+  }
+  return {
+    policy,
+    seed,
+    endless: true,
+    // An endless climb never wins — it ends lost, or on the clock.
+    won: false,
+    lost: run.phase === 'lost',
+    time: +run.time.toFixed(2),
+    maxHeight: +run.maxHeight.toFixed(1),
+    falls: run.falls,
+    latches: run.latches,
+    releases: run.releases,
+    orbs: run.orbs,
+    score: run.score,
+    steps,
+  };
+}
+
 // ---------------------------------------------------------------- save
+export const RANK_ORDER = { B: 1, A: 2, S: 3 };
 export function defaultSave() {
   return {
     version: 1,
-    best: {}, // climbId -> { score, time, falls, orbs, won }
+    best: {}, // climbId -> { score, time, falls, orbs, won, rank? }
     unlocked: 1, // highest climb id unlocked
+    endlessBest: null, // { height, score, seed, date }
     settings: { muted: false, shake: 100, flash: true },
   };
 }
@@ -823,10 +914,28 @@ export function parseSave(raw) {
     const s = JSON.parse(raw);
     if (!s || typeof s !== 'object') return defaultSave();
     const d = defaultSave();
+    const best = {};
+    for (const [id, entry] of Object.entries(s.best || {})) {
+      if (!entry || typeof entry !== 'object') continue;
+      const kept = { ...entry };
+      if (kept.rank !== undefined && !['S', 'A', 'B'].includes(kept.rank)) delete kept.rank;
+      best[id] = kept;
+    }
+    let endlessBest = null;
+    const eb = s.endlessBest;
+    if (eb && typeof eb === 'object' && Number.isFinite(eb.height) && eb.height >= 0) {
+      endlessBest = {
+        height: eb.height,
+        score: Number.isFinite(eb.score) ? eb.score : 0,
+        seed: Number.isInteger(eb.seed) ? eb.seed : 0,
+        date: typeof eb.date === 'string' ? eb.date : '',
+      };
+    }
     return {
       version: 1,
-      best: { ...(s.best || {}) },
+      best,
       unlocked: Number.isInteger(s.unlocked) ? clamp(s.unlocked, 1, CLIMBS.length) : 1,
+      endlessBest,
       settings: { ...d.settings, ...(s.settings || {}) },
     };
   } catch {
@@ -838,6 +947,16 @@ export function recordBest(save, climbId, result) {
   const prev = save.best[climbId];
   if (!result.won) return save;
   const better = !prev || result.score > prev.score;
+  // Capture the saved rank BEFORE a better score replaces the entry —
+  // otherwise the replacement wipes the rank we are trying to keep.
+  let rank = prev ? prev.rank : undefined;
+  // Rank is tracked independently of the score: a slower clear that
+  // earns a better rank still upgrades the saved rank, and a better
+  // score with a worse rank never downgrades it.
+  if (typeof result.par === 'number') {
+    const r = rankFor(result);
+    if (r && (!rank || RANK_ORDER[r] > RANK_ORDER[rank])) rank = r;
+  }
   if (better) {
     save.best[climbId] = {
       score: result.score,
@@ -847,8 +966,23 @@ export function recordBest(save, climbId, result) {
       won: true,
     };
   }
+  if (rank) save.best[climbId].rank = rank;
   if (climbId < CLIMBS.length && save.unlocked < climbId + 1) {
     save.unlocked = climbId + 1;
+  }
+  return save;
+}
+
+export function recordEndlessBest(save, result) {
+  const height = Math.max(0, Math.floor(result.maxHeight));
+  const prev = save.endlessBest;
+  if (!prev || height > prev.height) {
+    save.endlessBest = {
+      height,
+      score: result.score || 0,
+      seed: result.seed || 0,
+      date: result.date || new Date().toISOString().slice(0, 10),
+    };
   }
   return save;
 }
