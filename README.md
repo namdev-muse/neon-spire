@@ -53,9 +53,9 @@ You hang from a grapple rope on the face of a towering neon spire. There is no c
 
 ## Version
 
-v0.5.0 (M5 polish & robustness: endClimb race fix, HUD pill backdrops, Peak height label, game-over dialog fix, FPS guard, camera framing fix, settings performance line, How to Play wording). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
+v1.0.0 (M6 release: version bump only — no game-code changes from the playtested v0.5.0; final verification, README + screenshots + devlog, GitHub release). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
 
-## Known issues (M5)
+## Known issues (v1.0.0)
 
 - Portrait framing leaves large vertical empty bands above/below the action (same caveat class as Apex/Bastion) — carried to M6.
 - The live autopilot clear in the render check took 2 falls (slow-frame timing); the sim bot clears with 0 falls.

@@ -1,4 +1,4 @@
-// Neon Spire v0.5.0 — Three.js renderer + menus + game feel.
+// Neon Spire v1.0.0 — Three.js renderer + menus + game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns the
 // 3D scene, the screen stack, input, Web Audio SFX and the feel tiers.
 // The climber swings on the climb-face plane (x = lateral, y = height,
