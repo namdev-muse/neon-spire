@@ -40,7 +40,7 @@ jobs:
           test -f LICENSE
           test -f favicon.svg
           test -f package.json
-          test -f docs/devlog.md
+          test -f docs/DEVLOG.md
           test -f docs/screenshots/menu.png
           test -f docs/screenshots/gameplay.png
           test -f tests/smoke.js
