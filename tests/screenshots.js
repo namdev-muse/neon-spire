@@ -1,4 +1,4 @@
-// Neon Spire v0.2.0 — size sweep: menu + gameplay screenshots at
+// Neon Spire v0.2.1 — size sweep: menu + gameplay screenshots at
 // 1280x720, 2560x1080 and 1080x2340, for inspection by eye.
 // Same serving + Three.js-fulfilment setup as tests/render-check.js.
 // Run: node tests/screenshots.js

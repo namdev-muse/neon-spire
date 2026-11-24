@@ -1,4 +1,4 @@
-// Neon Spire v0.2.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Spire v0.2.1 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, CLIMBS, climbById, climbThreat, DT, GRAVITY, GRAPPLE_RANGE,
   ROPE_MIN, PUMP_ACCEL, MAX_SWING_SPEED, FALL_LIMIT, MAX_FALLS,
@@ -16,7 +16,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.2.0', VERSION === '0.2.0');
+check('physics version is 0.2.1', VERSION === '0.2.1');
 check('12 climbs defined', CLIMBS.length === 12);
 check('climb ids are 1..12 in order', CLIMBS.every((c, i) => c.id === i + 1));
 check('every climb has a name and a hint', CLIMBS.every((c) => c.name && c.hint));

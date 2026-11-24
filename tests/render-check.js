@@ -1,4 +1,4 @@
-// Neon Spire v0.2.0 — headless browser render check.
+// Neon Spire v0.2.1 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless
 // browser, and asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract demo
@@ -132,8 +132,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__spire.version);
-  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.2.0');
+  if (version !== '0.2.1') throw new Error(`expected version 0.2.1, got ${version}`);
+  console.log('render-check: game module initialised, version 0.2.1');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -149,7 +149,7 @@ try {
   // text anywhere the player can see. Climb 1 unlocked, climb 2 locked.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON SPIRE')) throw new Error('menu title missing');
-  if (menuText.includes('v0.2.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.2.1') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -331,6 +331,25 @@ try {
     throw new Error(`?climb=12 should start Void Crown, got ${JSON.stringify({ id: climb12.climbId, name: climb12.climbName })}`);
   }
   console.log('render-check: ?climb=12 jumps straight into Void Crown (unlock path reaches the last climb)');
+
+  // Regression: Try Again after losing a deep-linked LOCKED climb.
+  // The retry buttons must restart the climb you are already in — the
+  // lock gates menu entry only. Before the fix, Try Again re-checked
+  // the lock the deep link had bypassed, so the Climb Lost panel just
+  // stayed. Also asserts the game-over height never goes negative
+  // (maxHeight starts at -0.5) and the fall toast is cleared on run end.
+  await page.evaluate(() => { window.__spire.run.falls = 4; });
+  await page.waitForFunction(() => window.__spire.phase === 'gameover', null, { timeout: 60000 });
+  if (!await page.isVisible('#gameover')) throw new Error('game-over screen not visible after the forced loss on climb 12');
+  const overText = await page.textContent('#gameover-detail');
+  if (overText.includes('-1m')) throw new Error(`game-over height must not go negative, got: ${overText}`);
+  const toastHidden = await page.evaluate(() => !document.getElementById('hud-toast').classList.contains('show'));
+  if (!toastHidden) throw new Error('fall toast must be cleared when the run ends');
+  await page.click('#btn-retry');
+  await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
+  const retryInfo = await page.evaluate(() => window.__spire.info());
+  if (retryInfo.climbId !== 12 || retryInfo.falls !== 0) throw new Error(`Try Again should restart climb 12 fresh, got ${JSON.stringify({ id: retryInfo.climbId, falls: retryInfo.falls })}`);
+  console.log('render-check: Try Again restarts a deep-linked locked climb (retry bypasses the menu lock); game-over height non-negative, toast cleared');
 
   if (errors.length > 0) {
     console.error('render-check: console/page errors seen:');
