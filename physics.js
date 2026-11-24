@@ -1,4 +1,4 @@
-// Neon Spire v0.2.1 — pure simulation core (no DOM, no Three.js).
+// Neon Spire v0.3.0 — pure simulation core (no DOM, no Three.js).
 // A 3D neon grapple-climb ascender: the climber ascends a towering spire
 // by latching anchor rings, pumping the pendulum swing, and releasing at
 // the right moment to fly up and latch the next higher ring. The swing
@@ -23,7 +23,7 @@
 // Deterministic: every climb is hand-built from a fixed ring list, and
 // the fixed-step simulation gives identical results for identical inputs.
 
-export const VERSION = '0.2.1';
+export const VERSION = '0.3.0';
 export const DT = 1 / 60;
 export const GRAVITY = 18;
 export const GRAPPLE_RANGE = 12;
@@ -530,6 +530,16 @@ export function swingSpeed(run) {
   return run.vel.x * t.x + run.vel.y * t.y;
 }
 
+// Swing energy, 0..1: how much of the capped swing speed the climber
+// currently carries. The HUD meter, rope glow and pump-tick pitch all
+// read from this — the player must always be able to see how much
+// swing energy they have (Talon lesson), without it ever becoming a
+// "release now" prompt: there is no marker, no cue, just the energy.
+export function swingEnergy(run) {
+  if (run.attached === null) return 0;
+  return clamp(Math.abs(swingSpeed(run)) / MAX_SWING_SPEED, 0, 1);
+}
+
 // Nearest latchable ring: within range, not below the climber. The ring
 // just released is locked out until another ring is latched or the lock
 // expires — otherwise every release re-catches the ring you just left
@@ -863,7 +873,7 @@ export const FEEDBACK = {
   pump: { trauma: 0.05, hitStop: 0, sfx: 'pump', flash: 0, particles: 2 },
   release: { trauma: 0.22, hitStop: 0, sfx: 'release', flash: 0, particles: 8 },
   orb: { trauma: 0.15, hitStop: 0, sfx: 'orb', flash: 0, particles: 14 },
-  fall: { trauma: 0.55, hitStop: 0.06, sfx: 'fall', flash: 0.12, particles: 22 },
+  fall: { trauma: 0.5, hitStop: 0.06, sfx: 'fall', flash: 0.12, particles: 22 },
   summit: { trauma: 0.8, hitStop: 0.12, sfx: 'summit', flash: 0.2, particles: 60 },
   denied: { trauma: 0.08, hitStop: 0, sfx: 'denied', flash: 0, particles: 0 },
 };

@@ -1,4 +1,4 @@
-// Neon Spire v0.2.1 — Three.js renderer + menus + game feel.
+// Neon Spire v0.3.0 — Three.js renderer + menus + game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns the
 // 3D scene, the screen stack, input, Web Audio SFX and the feel tiers.
 // The climber swings on the climb-face plane (x = lateral, y = height,
@@ -10,7 +10,7 @@ import {
   VERSION, DT, CLIMBS, climbById, createRun, startRun, stepRun,
   decisionPolicy, nextRing, nextRingIndex, swingSpeed,
   defaultSave, serializeSave, parseSave, recordBest, isClimbUnlocked, rankFor,
-  FEEDBACK, FACE_Z,
+  FEEDBACK, FACE_Z, swingEnergy,
 } from './physics.js';
 
 const SAVE_KEY = 'neon-spire-save-v1';
@@ -43,6 +43,11 @@ const state = {
   slowMoT: 0,
   timeScale: 1,
   fovPunch: 0,
+  fovDip: 0,
+  camSnapT: 0,
+  pumpTicks: 0,
+  lastPumpSign: 0,
+  musicActive: false,
   toastT: 0,
   muted: save.settings.muted,
   shakePct: save.settings.shake,
@@ -85,12 +90,15 @@ function tone(freq, dur, type = 'sine', gain = 0.2, slideTo = null, delay = 0) {
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
 }
-function playSfx(name) {
+function playSfx(name, energy = 0) {
   if (!audioCtx) return;
   switch (name) {
     case 'latch': tone(880, 0.09, 'square', 0.12, 620); break;
     case 'release': tone(320, 0.16, 'sawtooth', 0.14, 130); break;
-    case 'pump': tone(520, 0.05, 'sine', 0.05, 640); break;
+    // Pump tick: pitch rises with swing energy, so pumping a fast
+    // swing sounds brighter than pumping a dead one — the ear learns
+    // the swing before the eye does.
+    case 'pump': tone(520 + energy * 420, 0.05, 'sine', 0.05 + energy * 0.04, 640 + energy * 420); break;
     case 'orb': tone(1320, 0.1, 'sine', 0.16); tone(1760, 0.14, 'sine', 0.12, null, 0.06); break;
     case 'fall': tone(170, 0.35, 'sawtooth', 0.2, 55); break;
     case 'summit':
@@ -101,6 +109,36 @@ function playSfx(name) {
     case 'checkpoint': tone(784, 0.12, 'sine', 0.14); tone(1046, 0.18, 'sine', 0.12, null, 0.08); break;
     default: break;
   }
+}
+// Generative music: a low pad (Am–F–C–G, one chord per bar) plus a
+// bass pulse and a soft arpeggio, sequenced from the frame loop with a
+// short lookahead. The pad filter opens and the arpeggio lifts an
+// octave as the climber gains height, so the music climbs with you.
+// Everything is scheduled through the audio clock — no timers to drift
+// — and every note is guarded: with no AudioContext (or while muted)
+// the scheduler simply does nothing.
+const MUSIC_BPM = 104;
+const MUSIC_STEP = 60 / MUSIC_BPM / 2; // 8th notes
+// [bass root, chord tones] per bar.
+const MUSIC_CHORDS = [
+  { root: 110.00, tones: [220.00, 261.63, 329.63] }, // Am
+  { root: 87.31, tones: [174.61, 220.00, 261.63] }, // F
+  { root: 130.81, tones: [196.00, 261.63, 329.63] }, // C
+  { root: 98.00, tones: [196.00, 246.94, 293.66] }, // G
+];
+let musicStepState = null;
+function musicNote(freq, t0, dur, type, gain) {
+  if (!audioCtx || !masterGain || state.muted || !state.musicOn) return;
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(gain, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  osc.connect(g).connect(masterGain);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.05);
 }
 function startMusic() {
   if (!audioCtx || musicNodes || !state.musicOn || state.muted) return;
@@ -121,12 +159,40 @@ function startMusic() {
   o1.connect(filter); o2.connect(filter);
   filter.connect(padGain).connect(masterGain);
   o1.start(); o2.start(); lfo.start();
-  musicNodes = { o1, o2, lfo, padGain };
+  musicNodes = { o1, o2, lfo, padGain, filter };
+  musicStepState = { nextStepTime: audioCtx.currentTime + 0.1, step: 0 };
+  state.musicActive = true;
+}
+function scheduleMusic() {
+  if (!musicNodes || !audioCtx || !musicStepState) return;
+  const run = activeRun();
+  const progress = run ? Math.min(1, Math.max(0, run.maxHeight / run.climb.height)) : 0;
+  // The pad opens up as the climber gains height.
+  if (musicNodes.filter) musicNodes.filter.frequency.value = 420 + progress * 520;
+  const now = audioCtx.currentTime;
+  while (musicStepState.nextStepTime < now + 0.25) {
+    const t0 = musicStepState.nextStepTime;
+    const step = musicStepState.step;
+    const bar = Math.floor(step / 8) % MUSIC_CHORDS.length;
+    const chord = MUSIC_CHORDS[bar];
+    const inBar = step % 8;
+    if (inBar === 0 || inBar === 4) musicNote(chord.root, t0, 0.3, 'triangle', 0.13);
+    if (inBar === 6) musicNote(chord.root * 1.5, t0, 0.2, 'triangle', 0.08);
+    // Arpeggio: one chord tone per 8th, cycling 0-1-2-1; up an octave
+    // past halfway up the climb.
+    const toneIdx = [0, 1, 2, 1, 0, 1, 2, 1][inBar];
+    const arpFreq = chord.tones[toneIdx] * (progress > 0.5 ? 2 : 1);
+    musicNote(arpFreq, t0, 0.18, 'sine', 0.045);
+    musicStepState.nextStepTime += MUSIC_STEP;
+    musicStepState.step++;
+  }
 }
 function stopMusic() {
   if (!musicNodes) return;
   try { musicNodes.o1.stop(); musicNodes.o2.stop(); musicNodes.lfo.stop(); } catch { /* already stopped */ }
   musicNodes = null;
+  musicStepState = null;
+  state.musicActive = false;
 }
 
 // ---------------------------------------------------------------- three
@@ -176,6 +242,8 @@ scene.add(climberGroup);
 // Rope: a 2-point line, hidden while airborne.
 const ropeGeo = new THREE.BufferGeometry();
 ropeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+const ROPE_COLD = new THREE.Color(0x22e6ff);
+const ROPE_HOT = new THREE.Color(0xffd75e);
 const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: 0x22e6ff, transparent: true, opacity: 0.95 }));
 rope.visible = false;
 rope.frustumCulled = false;
@@ -472,6 +540,12 @@ function updateHUD() {
   $('hud-falls').textContent = `Falls ${run.falls}/${5}`;
   const best = save.best[c.id];
   $('hud-best').textContent = best ? `Best ${best.score}` : 'Best —';
+  // Swing meter: current swing energy, 0..1. No marker, no cue — just
+  // how much swing you are carrying right now.
+  const energy = swingEnergy(run);
+  const fill = $('hud-swing-fill');
+  fill.style.width = `${Math.round(energy * 100)}%`;
+  fill.classList.toggle('hot', energy > 0.7);
 }
 
 // ---------------------------------------------------------------- feel
@@ -479,11 +553,12 @@ function updateHUD() {
 // feedback must stay visual-only: a demo latch must never shake the menu
 // camera, freeze the demo with hit-stop, or flash over the menu —
 // otherwise the menu never settles to its exact rest state.
-function fireFeedback(event, x, y, z, isDemo = false) {
+function fireFeedback(event, x, y, z, isDemo = false, energy = 0) {
   const fb = FEEDBACK[event];
   if (!fb) return;
   if (x !== undefined) spawnParticles(x, y, z, event === 'orb' ? 0xffd75e : 0x22e6ff, fb.particles, event === 'summit' ? 12 : 6);
   if (isDemo) return;
+  if (event === 'pump') state.pumpTicks++;
   const shakeScale = state.shakePct / 100;
   state.trauma = Math.min(1, state.trauma + fb.trauma * shakeScale);
   if (fb.hitStop > 0) state.hitStopT = Math.max(state.hitStopT, fb.hitStop);
@@ -496,7 +571,20 @@ function fireFeedback(event, x, y, z, isDemo = false) {
     state.fovPunch = 1;
   }
   if (event === 'release') state.fovPunch = Math.max(state.fovPunch, 0.45);
-  playSfx(fb.sfx);
+  if (event === 'latch') {
+    // Latch snap: the camera briefly locks onto the new anchor and the
+    // FOV dips in, so a latch reads as a catch, not a teleport.
+    state.camSnapT = 0.18;
+    state.fovDip = 0.6;
+    // Hard latch: catching a ring at high swing speed punches harder —
+    // a short hit-stop and a low thud on top of the latch bundle.
+    if (energy > 0.7) {
+      state.hitStopT = Math.max(state.hitStopT, 0.04);
+      spawnParticles(x, y, z, 0xffd75e, 10, 9);
+      tone(170, 0.12, 'sine', 0.22, 70);
+    }
+  }
+  playSfx(fb.sfx, energy);
 }
 function activeRun() {
   return state.phase === 'menu' ? state.demoRun : state.run;
@@ -522,6 +610,10 @@ function startClimb(id, viaParam = false) {
   state.slowMoT = 0;
   state.timeScale = 1;
   state.fovPunch = 0;
+  state.fovDip = 0;
+  state.camSnapT = 0;
+  state.pumpTicks = 0;
+  state.lastPumpSign = 0;
   buildClimbScene(climb);
   hideAllScreens();
   hudEl.classList.remove('hidden');
@@ -584,6 +676,9 @@ function quitToMenu() {
   // from the run that just ended.
   state.trauma = 0;
   state.fovPunch = 0;
+  state.fovDip = 0;
+  state.camSnapT = 0;
+  state.lastPumpSign = 0;
   state.hitStopT = 0;
   state.slowMoT = 0;
   state.timeScale = 1;
@@ -777,12 +872,13 @@ function handleEvents(run, isDemo) {
   if (!run) return;
   if (run.latches > prevLatches) {
     const r = run.attached !== null ? run.climb.rings[run.attached] : null;
+    const energy = swingEnergy(run);
     if (r && r.checkpoint && !isDemo) {
-      fireFeedback('latch', run.pos.x, run.pos.y, FACE_Z, isDemo);
+      fireFeedback('latch', run.pos.x, run.pos.y, FACE_Z, isDemo, energy);
       playSfx('checkpoint');
       showToast(r.summit ? 'Summit ring!' : 'Checkpoint — falls send you back here');
     } else {
-      fireFeedback('latch', run.pos.x, run.pos.y, FACE_Z, isDemo);
+      fireFeedback('latch', run.pos.x, run.pos.y, FACE_Z, isDemo, energy);
     }
     if (!isDemo) spawnPop(`+${25}`, run.pos.x, run.pos.y + 1);
   }
@@ -825,26 +921,45 @@ function stepActive(dtReal) {
   if (state.slowMoT > 0) state.slowMoT -= dtReal;
   acc += dtReal * state.timeScale;
   let guard = 0;
+  let lastInp = null;
   while (acc >= DT && guard < 8) {
     const inp = currentInput(run);
     stepRun(run, inp, DT);
     handleEvents(run, state.phase === 'menu');
+    lastInp = inp;
     acc -= DT;
     guard++;
     if (run.phase !== 'climbing' && state.phase === 'playing') break;
   }
   if (guard >= 8) acc = 0;
+  // Pump feedback: the pump bundle fires on each pump-direction edge
+  // while the climber is attached and pumping WITH the swing — the
+  // core interaction finally has a sound, a sparkle and a nudge, and
+  // its pitch follows the swing energy. Pumping against the swing
+  // stays silent: braking should feel like braking.
+  if (lastInp && lastInp.pump !== 0 && lastInp.pump !== state.lastPumpSign) {
+    state.lastPumpSign = lastInp.pump;
+    if (run.attached !== null && state.phase !== 'paused') {
+      const ss = swingSpeed(run);
+      if (Math.abs(ss) > 1 && Math.sign(ss) === lastInp.pump) {
+        fireFeedback('pump', run.pos.x, run.pos.y, FACE_Z, state.phase === 'menu', swingEnergy(run));
+      }
+    }
+  } else if (lastInp) {
+    state.lastPumpSign = lastInp.pump;
+  }
 }
 
 function syncScene(run, tSec, dtReal) {
   if (!run) return;
+  const energy = swingEnergy(run);
   // Climber.
   climberGroup.position.set(run.pos.x, run.pos.y, FACE_Z);
   climberCore.rotation.y += 0.02;
   climberCore.rotation.x += 0.011;
   climberHalo.rotation.z += 0.03;
   const pulse = 1 + Math.sin(tSec * 5) * 0.06;
-  climberHalo.scale.setScalar(pulse);
+  climberHalo.scale.setScalar(pulse * (1 + energy * 0.35));
   // Trail.
   trailPts.push(run.pos.x, run.pos.y, FACE_Z);
   if (trailPts.length > TRAIL_N * 3) trailPts.splice(0, 3);
@@ -861,6 +976,8 @@ function syncScene(run, tSec, dtReal) {
     rp[3] = run.pos.x; rp[4] = run.pos.y; rp[5] = FACE_Z;
     ropeGeo.attributes.position.needsUpdate = true;
     rope.visible = true;
+    // The rope heats from cyan to gold with swing energy.
+    rope.material.color.lerpColors(ROPE_COLD, ROPE_HOT, energy);
   } else {
     rope.visible = false;
   }
@@ -887,7 +1004,11 @@ function syncScene(run, tSec, dtReal) {
   const py = run.pos.y;
   camTarget.set(px * 0.55, py - 2.5, 23);
   camLook.set(px * 0.8, py + 5.5, FACE_Z);
-  camera.position.lerp(camTarget, 1 - Math.pow(0.001, 1 / 60));
+  // Latch snap: for a beat after a latch the camera locks onto the new
+  // anchor much harder than the usual soft follow.
+  const snap = state.camSnapT > 0;
+  camera.position.lerp(camTarget, snap ? 0.4 : 1 - Math.pow(0.001, 1 / 60));
+  if (snap) state.camSnapT -= dtReal;
   // Trauma shake (decays in REAL time, never moves physics — per-frame
   // decay freezes the camera off-centre under slow frames).
   state.trauma = Math.max(0, state.trauma - 1.6 * dtReal);
@@ -895,10 +1016,11 @@ function syncScene(run, tSec, dtReal) {
   camera.position.x += (Math.random() - 0.5) * sh * 1.6;
   camera.position.y += (Math.random() - 0.5) * sh * 1.6;
   camera.lookAt(camLook);
-  // FOV punch on release / summit, easing back to base in real time
-  // (per-frame decay stalls under slow frames, like trauma did).
+  // FOV punch on release / summit, dip on latch, easing back to base
+  // in real time (per-frame decay stalls under slow frames, like trauma did).
   state.fovPunch = Math.max(0, state.fovPunch - 1.8 * dtReal);
-  const fov = FOV_BASE + state.fovPunch * 6;
+  state.fovDip = Math.max(0, state.fovDip - 2.2 * dtReal);
+  const fov = FOV_BASE + state.fovPunch * 6 - state.fovDip * 4;
   if (Math.abs(camera.fov - fov) > 0.05) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -918,6 +1040,7 @@ function frame(now) {
   const run = activeRun();
   if (run) syncScene(run, tSec, dtReal);
   updateParticles(dtReal);
+  scheduleMusic();
   if (renderer) renderer.render(scene, camera);
   if (state.phase === 'playing') updateHUD();
 }
@@ -948,6 +1071,11 @@ function info() {
     attached: run ? run.attached : null,
     ropeLen: run ? +run.ropeLen.toFixed(2) : null,
     swingSpeed: run ? +swingSpeed(run).toFixed(2) : null,
+    swingEnergy: run ? +swingEnergy(run).toFixed(3) : 0,
+    pumpTicks: state.pumpTicks,
+    fovDip: +state.fovDip.toFixed(3),
+    camSnapT: +state.camSnapT.toFixed(3),
+    musicActive: state.musicActive,
     nextRing: run ? nextRing(run) : null,
     latches: run ? run.latches : 0,
     releases: run ? run.releases : 0,
