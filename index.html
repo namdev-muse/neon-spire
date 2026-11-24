@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Neon Spire — 3D Neon Grapple-Climb Ascender</title>
+<meta name="description" content="Neon Spire: a 3D neon grapple-climb ascender. Latch the anchor rings, pump the swing, release at the top of the arc and fly up the spire.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="hit-flash" class="hit-flash" aria-hidden="true"></div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="hud-left">
+    <span id="hud-climb">Climb 1 — First Light</span>
+    <span id="hud-time">0:00.0</span>
+    <span id="hud-best" class="hud-best">Best —</span>
+  </div>
+  <div class="hud-mid">
+    <span id="hud-height">Height 0m</span>
+    <span id="hud-score">Score 0</span>
+    <span id="hud-orbs">Orbs 0/4</span>
+    <span id="hud-falls">Falls 0</span>
+  </div>
+  <div class="hud-right">
+    <button id="btn-mute-hud" class="icon-btn" type="button" aria-label="Toggle sound">Sound: On</button>
+    <button id="btn-pause" class="icon-btn" type="button" aria-label="Pause game">Pause</button>
+  </div>
+</div>
+<div id="hud-toast" class="hud-toast" aria-hidden="true"></div>
+<div id="pops" class="pops" aria-hidden="true"></div>
+<div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
+
+<!-- Touch controls -->
+<div id="touch-controls" class="hidden">
+  <button id="btn-pump-left" class="touch-btn" type="button" aria-label="Pump left">&#9664;</button>
+  <button id="btn-grapple" class="touch-btn grapple" type="button" aria-label="Hold to grapple">GRAPPLE</button>
+  <button id="btn-pump-right" class="touch-btn" type="button" aria-label="Pump right">&#9654;</button>
+</div>
+
+<!-- Main menu -->
+<div id="menu" class="overlay">
+  <div class="panel panel-menu">
+    <h1>NEON SPIRE</h1>
+    <p class="tagline">Latch the rings. Pump the swing. Release at the top of the arc — and fly.</p>
+    <p id="webgl-error" class="webgl-error hidden">3D graphics couldn't start in this browser — Neon Spire needs WebGL. Try a recent Chrome, Edge or Firefox on a device with graphics support.</p>
+    <div class="menu-col menu-actions">
+      <button id="btn-play" class="btn primary" type="button">Play</button>
+      <button id="btn-howto" class="btn" type="button">How to Play</button>
+      <button id="btn-settings" class="btn" type="button">Settings</button>
+      <button id="btn-mute-menu" class="btn small" type="button">Sound: On</button>
+      <p id="menu-best" class="menu-best"></p>
+      <p id="menu-hint" class="menu-best"></p>
+    </div>
+    <div class="menu-col menu-setup">
+      <div id="climb-select" class="track-select" aria-label="Climb select"></div>
+      <p id="climb-hint" class="set-hint"></p>
+    </div>
+  </div>
+</div>
+
+<!-- How to play -->
+<div id="howto" class="overlay hidden">
+  <div class="panel">
+    <h2>How to Play</h2>
+    <ul class="howto-list">
+      <li>You hang from a <strong>grapple rope</strong> on the face of a neon spire. There is no climbing up by hand — the <strong>swing</strong> is the way up.</li>
+      <li><strong>Hold Space / mouse / GRAPPLE</strong> to latch the nearest anchor ring in reach. The rope only reaches the rings you can actually fly to — no auto-aim.</li>
+      <li><strong>Pump with A / D or Left / Right</strong> in time with the swing — push <em>with</em> the motion, not against it — to build amplitude.</li>
+      <li><strong>Release Space at the top of the arc</strong>, while you are flying up toward the next ring, and latch it mid-flight. Release too early and you fall back; too late and the swing carries you past.</li>
+      <li>Collect <strong>gold orbs</strong> along the good lines for score. Touch a <strong>checkpoint ring</strong> and a fall sends you back there, not to the base.</li>
+      <li>Fall below your last checkpoint and you drop back to it. <strong>5 falls</strong> ends the climb. Latch the <strong>gold summit ring</strong> to clear the climb.</li>
+      <li>Your <strong>best score</strong> is saved per climb — beat it. Clearing a climb unlocks the next one.</li>
+    </ul>
+    <h3>Controls</h3>
+    <ul class="howto-list">
+      <li>Hold Space / mouse button: grapple &middot; A / D or Left / Right: pump the swing &middot; Release Space: let go</li>
+      <li>P: pause &middot; M: mute &middot; R: restart</li>
+      <li>Touch: hold GRAPPLE, tap &#9664; / &#9654; to pump</li>
+      <li>Esc closes a panel &middot; Enter confirms on menus</li>
+    </ul>
+    <button id="btn-howto-close" class="btn primary" type="button">Got it</button>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settings" class="overlay hidden">
+  <div class="panel">
+    <h2>Settings</h2>
+    <label class="slider-row">Volume
+      <input id="volume-range" type="range" min="0" max="100" value="60" aria-label="Volume">
+      <span id="volume-value">60%</span>
+    </label>
+    <label class="slider-row">Screen shake
+      <input id="shake-range" type="range" min="0" max="100" value="100" aria-label="Screen shake strength">
+      <span id="shake-value">100%</span>
+    </label>
+    <label class="toggle-row">Music
+      <input id="music-toggle" type="checkbox" checked aria-label="Music on or off">
+    </label>
+    <label class="toggle-row">Sound effects
+      <input id="sfx-toggle" type="checkbox" checked aria-label="Sound effects on or off">
+    </label>
+    <label class="toggle-row">Reduce flashing
+      <input id="reduce-flashing" type="checkbox" aria-label="Reduce flashing — no bright flashes">
+    </label>
+    <label class="slider-row">Text size
+      <select id="text-size-select" aria-label="Text size">
+        <option value="1">Normal</option>
+        <option value="1.2">Large</option>
+        <option value="1.4">Extra large</option>
+      </select>
+    </label>
+    <label class="toggle-row">High contrast
+      <input id="high-contrast-toggle" type="checkbox" aria-label="High contrast — brighter text and panels">
+    </label>
+    <button id="btn-settings-close" class="btn primary" type="button">Back to Menu</button>
+  </div>
+</div>
+
+<!-- Climb complete -->
+<div id="complete" class="overlay hidden">
+  <div class="panel">
+    <h2>Summit Reached</h2>
+    <p id="complete-score" class="big-score">Score 0</p>
+    <p id="complete-detail"></p>
+    <p id="complete-best" class="complete-best"></p>
+    <p id="complete-rank" class="complete-best"></p>
+    <p id="complete-orbs" class="complete-best"></p>
+    <button id="btn-next" class="btn primary" type="button">Next Climb</button>
+    <button id="btn-replay" class="btn" type="button">Climb Again</button>
+    <button id="btn-menu-complete" class="btn" type="button">Main Menu</button>
+  </div>
+</div>
+
+<!-- Climb lost -->
+<div id="gameover" class="overlay hidden">
+  <div class="panel">
+    <h2>Climb Lost</h2>
+    <p id="gameover-detail" class="big-score"></p>
+    <p id="gameover-best" class="complete-best"></p>
+    <button id="btn-retry" class="btn primary" type="button">Try Again</button>
+    <button id="btn-menu-over" class="btn" type="button">Main Menu</button>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>Paused</h2>
+    <button id="btn-resume" class="btn primary" type="button">Resume</button>
+    <button id="btn-restart" class="btn" type="button">Restart Climb</button>
+    <button id="btn-quit" class="btn" type="button">Quit to Menu</button>
+    <label class="slider-row">Screen shake
+      <input id="shake-range-pause" type="range" min="0" max="100" value="100" aria-label="Screen shake strength">
+      <span id="shake-value-pause">100%</span>
+    </label>
+    <button id="btn-mute-pause" class="btn small" type="button">Sound: On</button>
+  </div>
+</div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>

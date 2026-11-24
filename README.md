@@ -1,0 +1,51 @@
+# Neon Spire — 3D Neon Grapple-Climb Ascender
+
+Latch the anchor rings, pump the pendulum swing, release at the top of the arc — and fly up the spire.
+
+**Play it live:** https://namdev-muse.github.io/neon-spire/
+
+![Menu](docs/screenshots/menu.png)
+![Gameplay](docs/screenshots/gameplay.png)
+
+## The game
+
+You hang from a grapple rope on the face of a towering neon spire. There is no climbing up by hand — the **swing** is the way up.
+
+- **Hold Space / mouse / GRAPPLE** to latch the nearest anchor ring in reach. The rope only reaches the rings you can actually fly to — no auto-aim, no "release now" prompt.
+- **Pump with A / D or Left / Right** in time with the swing — push *with* the motion, not against it — to build amplitude.
+- **Release at the top of the arc**, while flying up toward the next ring, and latch it mid-flight. Release too early and you fall back; too late and the swing carries you past.
+- Collect **gold orbs** along the good lines for score. Touch a **checkpoint ring** and a fall sends you back there, not to the base.
+- Fall below your last checkpoint and you drop back to it. **5 falls** ends the climb. Latch the **gold summit ring** to clear the climb.
+- Your **best score** is saved per climb. Clearing a climb unlocks the next one. Ranks: **S** (no falls, under par), **A** (under par), **B** (cleared).
+
+## Climbs (M1: 3)
+
+| # | Climb | Height | Par |
+|---|-------|--------|-----|
+| 1 | First Light | 60m | 45s |
+| 2 | Crosswind | 84m | 60s |
+| 3 | Vortex Crown | 102m | 75s |
+
+## Controls
+
+- Hold **Space** / mouse button: grapple · **A / D** or **Left / Right**: pump the swing · Release **Space**: let go
+- **P**: pause · **M**: mute · **R**: restart
+- Touch: hold **GRAPPLE**, tap **◀ / ▶** to pump
+- **Esc** closes a panel · **Enter** confirms on menus
+
+## Tech
+
+- Three.js 0.160.0 (pinned, jsdelivr import map), vanilla HTML/CSS/JS, Web Audio API synth SFX, no build step, GitHub Pages from `main` / root.
+- Pure simulation core in `physics.js` (no DOM, no Three.js) — deterministic fixed-step pendulum sim, driven through public input hooks by the bot harness.
+- Game feel: trauma screen shake (real-time decay), hit-stop, FOV punch, summit slow-mo, pooled particles, score pops, synth SFX + ambient pad.
+- Tests: `npm test` (smoke 65 + bot gates), `npm run render-check` (headless Chromium: menu, demo, screen-space pump, release/re-latch, autopilot clear, fall/respawn, pause, shake, rest state, `?climb=` unlock path), `npm run screenshots` (1280x720 / 2560x1080 / 1080x2340, inspected by eye).
+
+## Version
+
+v0.1.0 (M1 core). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
+
+## Known issues (M1)
+
+- Portrait framing leaves large vertical empty bands above/below the action (same caveat class as Apex/Bastion) — M5 item.
+- The live autopilot clear in the render check took 2 falls (slow-frame timing); the sim bot clears with 0 falls.
+- Music/SFX have not had a human-ear check yet (render check proves the scheduler runs).
