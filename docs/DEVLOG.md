@@ -1,5 +1,9 @@
 # Neon Spire — devlog
 
+## v0.2.1 — M2 hotfix (same run, Tue 2026-11-24 ~16:30 +07)
+
+Live playtest of v0.2.0 found one real defect: Try Again was dead after losing a deep-linked locked climb (`?climb=12`). Root cause: the retry buttons (Try Again, Climb Again, pause Restart, R) called `startClimb(id)` with `viaParam=false`, so the retry re-checked the lock the deep link had bypassed — the denied toast fired behind the Climb Lost panel and nothing happened. Fix: in-run retry/restart passes `viaParam=true` — the lock gates menu entry only; once you are playing a climb, retrying it is not a new entry. Also fixed two cosmetics from the same playtest: the game-over panel could read "Reached -1m" (maxHeight starts at −0.5; now clamped to ≥ 0) and the "Fell back to the checkpoint" toast lingered over the game-over panel (endClimb now clears transient UI state on run end — Talon lesson). Regression test added to the render check: force a loss on `?climb=12`, assert the panel shows a non-negative height, the toast is cleared, and Try Again restarts climb 12 fresh.
+
 ## v0.2.0 — M2 climb craft (milestone run, Tue 2026-11-24 15:30 +07)
 
 12 hand-crafted climbs (was 3): Verdant Rise 118m, Ember Stair 124m, Rose Circuit 150m, Tideglass 159m, Azure Spiral 176m, Crimson Gate 186m, Golden Helix 196m, Frost Veil 206m, Void Crown 216m — each with its own identity (distinct ring layout, gap pattern and accent). Heights 60→216m, rings 7→23, par times retuned from measured decision-bot times (par ≈ 3.5× bot time). Render check now asserts 12 climb cards (11 locked on a fresh save) and `?climb=12` reaching Void Crown.
