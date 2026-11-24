@@ -1,4 +1,4 @@
-// Neon Spire v0.3.0 — size sweep: menu + gameplay screenshots at
+// Neon Spire v0.4.0 — size sweep: menu + gameplay screenshots at
 // 1280x720, 2560x1080 and 1080x2340, for inspection by eye.
 // Same serving + Three.js-fulfilment setup as tests/render-check.js.
 // Run: node tests/screenshots.js
@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process';
 
 const GAME_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS_DIR = path.join(os.tmpdir(), 'neon-spire-screenshots');
+const DOCS_SHOTS_DIR = path.join(GAME_DIR, 'docs', 'screenshots');
 const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 const THREE_CACHE = path.join(os.tmpdir(), 'neon-spire-three-0.160.0.module.js');
 
@@ -92,12 +93,38 @@ try {
     console.log(`screenshots: gameplay-${size.name}.png saved`);
     await context.close();
   }
+  // M4: an Endless Ascent gameplay shot, plus fresh menu/gameplay
+  // shots for the README (docs/screenshots), taken from the 1280x720
+  // captures above.
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, timezoneId: 'Asia/Bangkok', hasTouch: true });
+    const page = await context.newPage();
+    page.on('console', (msg) => { if (msg.type() === 'error') errors.push('endless console: ' + msg.text()); });
+    page.on('pageerror', (err) => errors.push('endless pageerror: ' + String(err)));
+    await page.route(THREE_URL, (route) => route.fulfill({ path: cached }));
+    await page.goto(`http://127.0.0.1:${port}/?endless=20261124`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForFunction(() => window.__spire && window.__spire.phase === 'playing', null, { timeout: 30000 });
+    await page.evaluate(() => window.__spire.autopilot(true));
+    await page.waitForTimeout(5000);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'endless-1280x720.png'), timeout: 60000 });
+    console.log('screenshots: endless-1280x720.png saved');
+    await context.close();
+  }
+  fs.mkdirSync(DOCS_SHOTS_DIR, { recursive: true });
+  for (const [src, dst] of [
+    ['menu-1280x720.png', 'menu.png'],
+    ['gameplay-1280x720.png', 'gameplay.png'],
+    ['endless-1280x720.png', 'endless.png'],
+  ]) {
+    fs.copyFileSync(path.join(SHOTS_DIR, src), path.join(DOCS_SHOTS_DIR, dst));
+    console.log(`screenshots: docs/screenshots/${dst} refreshed`);
+  }
   if (errors.length > 0) {
     console.error('screenshots: errors seen:');
     errors.forEach((e) => console.error('  ' + e));
     process.exitCode = 1;
   } else {
-    console.log(`screenshots: done — 6 shots in ${SHOTS_DIR}, zero console/page errors. INSPECT BY EYE.`);
+    console.log(`screenshots: done — 7 shots in ${SHOTS_DIR} (menu/gameplay/endless copied to docs/screenshots/), zero console/page errors. INSPECT BY EYE.`);
   }
 } catch (err) {
   console.error('screenshots: FAIL —', err.message);

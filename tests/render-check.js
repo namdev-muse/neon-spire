@@ -1,4 +1,4 @@
-// Neon Spire v0.3.0 — headless browser render check.
+// Neon Spire v0.4.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless
 // browser, and asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract demo
@@ -137,8 +137,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__spire.version);
-  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.0');
+  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.4.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -154,11 +154,20 @@ try {
   // text anywhere the player can see. Climb 1 unlocked, climb 2 locked.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON SPIRE')) throw new Error('menu title missing');
-  if (menuText.includes('v0.3.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.4.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
   if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
+  // M4: the Endless Ascent button is a SECONDARY action — Play stays
+  // the one primary — and the menu shows the endless best line.
+  const endlessClass = await page.getAttribute('#btn-endless', 'class');
+  if (!endlessClass || endlessClass.includes('primary')) throw new Error('Endless Ascent must be a secondary button, not primary');
+  const endlessLabel = await page.textContent('#btn-endless');
+  if (!endlessLabel.includes('Endless Ascent')) throw new Error(`Endless button label wrong: ${endlessLabel}`);
+  const endlessBestLine = await page.textContent('#menu-endless-best');
+  if (!endlessBestLine.includes('Endless Ascent')) throw new Error(`endless best line missing on a fresh save: ${endlessBestLine}`);
+  console.log(`render-check: Endless Ascent is a secondary menu action (best line: "${endlessBestLine.trim()}")`);
   const climbCards = await page.locator('#climb-select .track-card').count();
   if (climbCards !== 12) throw new Error(`expected 12 climb cards, got ${climbCards}`);
   const climbs = await page.evaluate(() => window.__spire.climbs.map((c) => c.name));
@@ -322,8 +331,13 @@ try {
 
   // Back to the menu, then start climb 1 again with NO input: the
   // climber releases, falls, and respawns at the checkpoint.
+  // M4: the climb-1 card shows the rank badge earned by the clear.
   await page.click('#btn-menu-complete');
   await page.waitForFunction(() => window.__spire.phase === 'menu', null, { timeout: 5000 });
+  const rankBadge = await page.locator('#climb-select .track-card').first().locator('.tc-rank').textContent().catch(() => null);
+  if (!rankBadge || !/^[SAB]$/.test(rankBadge.trim())) throw new Error(`climb-1 card should show a rank badge after the clear, got: ${rankBadge}`);
+  const savedRank = await page.evaluate(() => window.__spire.save.best[1] && window.__spire.save.best[1].rank);
+  console.log(`render-check: climb-1 card shows rank badge "${rankBadge.trim()}" (saved rank ${savedRank})`);
   await page.click('#btn-play');
   await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
   await page.waitForFunction(() => {
@@ -378,6 +392,60 @@ try {
   if (rest.fovDip !== 0) throw new Error(`rest state fovDip should be 0, got ${rest.fovDip}`);
   if (rest.camSnapT !== 0) throw new Error(`rest state camSnapT should be 0, got ${rest.camSnapT}`);
   console.log('render-check: rest state clean (trauma 0, FOV 62, timeScale 1, fovDip 0, camSnapT 0)');
+
+  // M4: Endless Ascent from the menu button. The HUD shows the mode
+  // and a bare height (no total — there is no summit), the climber
+  // starts latched to ring 0, and the autopilot climbs it live.
+  await page.click('#btn-endless');
+  await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
+  const endlessInfo = await page.evaluate(() => window.__spire.info());
+  if (!endlessInfo.endless || endlessInfo.climbName !== 'Endless Ascent') {
+    throw new Error(`Endless button should start Endless Ascent, got ${JSON.stringify({ endless: endlessInfo.endless, name: endlessInfo.climbName })}`);
+  }
+  if (endlessInfo.attached !== 0) throw new Error(`endless climber should start latched to ring 0, got attached=${endlessInfo.attached}`);
+  const endlessHudClimb = await page.textContent('#hud-climb');
+  if (!endlessHudClimb.includes('Endless Ascent')) throw new Error(`endless HUD should name the mode, got: ${endlessHudClimb}`);
+  const endlessHudHeight = await page.textContent('#hud-height');
+  if (!/^Height \d+m$/.test(endlessHudHeight.trim())) throw new Error(`endless HUD height should be a bare height, got: ${endlessHudHeight}`);
+  console.log('render-check: Endless Ascent starts from the menu button (HUD names the mode, climber latched to ring 0)');
+  await page.evaluate(() => window.__spire.autopilot(true));
+  await page.waitForFunction(() => {
+    const i = window.__spire.info();
+    return i && i.maxHeight >= 25;
+  }, null, { timeout: 90000 });
+  const endlessClimb = await page.evaluate(() => window.__spire.info());
+  console.log(`render-check: autopilot climbs Endless Ascent live (height ${endlessClimb.maxHeight}m, score ${endlessClimb.score})`);
+  await page.evaluate(() => window.__spire.autopilot(false));
+  // Quitting to the menu from an endless run banks the best height.
+  await page.evaluate(() => window.__spire.quitToMenu());
+  await page.waitForFunction(() => window.__spire.phase === 'menu', null, { timeout: 5000 });
+  const bankedBest = await page.evaluate(() => window.__spire.save.endlessBest);
+  if (!bankedBest || !(bankedBest.height > 0)) throw new Error(`quitting an endless run should bank a best height, got ${JSON.stringify(bankedBest)}`);
+  const menuEndlessBest = await page.textContent('#menu-endless-best');
+  if (!menuEndlessBest.includes(`Endless best: ${bankedBest.height}m`)) throw new Error(`menu endless best line should show the banked height, got: ${menuEndlessBest}`);
+  console.log(`render-check: quitting Endless Ascent banks the best height (${bankedBest.height}m) and the menu shows it`);
+
+  // ?endless=<seed> deep-links straight into that seeded climb.
+  await page.goto(`http://127.0.0.1:${port}/?endless=20261124`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForFunction(() => window.__spire && window.__spire.phase === 'playing', null, { timeout: 30000 });
+  const deepEndless = await page.evaluate(() => window.__spire.info());
+  if (!deepEndless.endless || deepEndless.climbName !== 'Endless Ascent' || deepEndless.endlessSeed !== 20261124) {
+    throw new Error(`?endless=20261124 should start seed 20261124, got ${JSON.stringify({ endless: deepEndless.endless, name: deepEndless.climbName, seed: deepEndless.endlessSeed })}`);
+  }
+  console.log('render-check: ?endless=20261124 jumps straight into the seeded endless climb');
+  // ?endless=1 starts today's seeded climb.
+  await page.goto(`http://127.0.0.1:${port}/?endless=1`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForFunction(() => window.__spire && window.__spire.phase === 'playing', null, { timeout: 30000 });
+  const todayEndless = await page.evaluate(() => {
+    const i = window.__spire.info();
+    const d = new Date();
+    const today = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    return { endless: i.endless, seed: i.endlessSeed, today };
+  });
+  if (!todayEndless.endless || todayEndless.seed !== todayEndless.today) {
+    throw new Error(`?endless=1 should start today's seed ${todayEndless.today}, got ${todayEndless.seed}`);
+  }
+  console.log(`render-check: ?endless=1 starts today's seeded climb (seed ${todayEndless.seed})`);
 
   // ?climb=3 reaches climb 3 (public unlock/seed path — Apex lesson).
   await page.goto(`http://127.0.0.1:${port}/?climb=3`, { waitUntil: 'domcontentloaded', timeout: 30000 });

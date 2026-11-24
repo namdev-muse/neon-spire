@@ -1,4 +1,4 @@
-// Neon Spire v0.3.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Spire v0.4.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, CLIMBS, climbById, climbThreat, DT, GRAVITY, GRAPPLE_RANGE,
   ROPE_MIN, PUMP_ACCEL, MAX_SWING_SPEED, FALL_LIMIT, MAX_FALLS,
@@ -6,6 +6,7 @@ import {
   swingTangent, swingSpeed, swingEnergy, noInputPolicy, holdPolicy, randomPolicy,
   decisionPolicy, simulateRun, defaultSave, serializeSave, parseSave,
   recordBest, isClimbUnlocked, rankFor, FEEDBACK, FEEDBACK_TIERS, FEEDBACK_LAYERS,
+  generateEndlessClimb, createEndlessRun, simulateEndless, recordEndlessBest,
 } from '../physics.js';
 
 let passed = 0, failed = 0;
@@ -16,7 +17,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.3.0', VERSION === '0.3.0');
+check('physics version is 0.4.0', VERSION === '0.4.0');
 check('12 climbs defined', CLIMBS.length === 12);
 check('climb ids are 1..12 in order', CLIMBS.every((c, i) => c.id === i + 1));
 check('every climb has a name and a hint', CLIMBS.every((c) => c.name && c.hint));
@@ -223,6 +224,65 @@ check('startRun returns null for unknown climb', startRun(99) === null);
     recordBest(s3, 1, { won: false, score: 9999, time: 10, falls: 5, orbs: 0 });
     return !s3.best[1];
   })());
+}
+// Per-climb clear ranks are saved and kept (M4): rank tracking is
+// independent of the score — a better rank upgrades the saved rank
+// even on a lower-score clear, and a worse rank never downgrades it.
+{
+  const s = defaultSave();
+  recordBest(s, 1, { won: true, score: 1500, time: 40, falls: 0, orbs: 3, par: 45 });
+  check('an S clear stores rank S', s.best[1].rank === 'S');
+  recordBest(s, 1, { won: true, score: 1600, time: 40, falls: 1, orbs: 3, par: 45 });
+  check('a later A clear with a better score keeps rank S', s.best[1].rank === 'S' && s.best[1].score === 1600);
+  const s2 = defaultSave();
+  recordBest(s2, 1, { won: true, score: 1000, time: 90, falls: 0, orbs: 2, par: 45 });
+  check('a B clear stores rank B', s2.best[1].rank === 'B');
+  recordBest(s2, 1, { won: true, score: 900, time: 40, falls: 1, orbs: 2, par: 45 });
+  check('a later A clear with a lower score upgrades rank B to A', s2.best[1].rank === 'A' && s2.best[1].score === 1000);
+  recordBest(s2, 1, { won: true, score: 800, time: 90, falls: 2, orbs: 2, par: 45 });
+  check('rank survives a lower-score clear', s2.best[1].rank === 'A' && s2.best[1].score === 1000);
+  const s3 = parseSave(serializeSave(s2));
+  check('save round-trip keeps rank', s3.best[1].rank === 'A');
+  check('parseSave drops an invalid rank', parseSave(JSON.stringify({ best: { 1: { score: 1, won: true, rank: 'X' } } })).best[1].rank === undefined);
+  check('parseSave keeps a valid rank', parseSave(JSON.stringify({ best: { 1: { score: 1, won: true, rank: 'S' } } })).best[1].rank === 'S');
+}
+// Endless Ascent (M4): seeded generation, balance gates, best height.
+{
+  const e1 = generateEndlessClimb(20261124);
+  const e2 = generateEndlessClimb(20261124);
+  check('endless generation is deterministic per seed', JSON.stringify(e1.rings) === JSON.stringify(e2.rings) && JSON.stringify(e1.orbs) === JSON.stringify(e2.orbs));
+  check('endless generation differs across seeds', JSON.stringify(generateEndlessClimb(20261125).rings) !== JSON.stringify(e1.rings));
+  check('endless climb has ~120 rings', e1.rings.length === 120);
+  check('endless climb starts at ring(0,2) checkpoint', e1.rings[0].x === 0 && e1.rings[0].y === 2 && e1.rings[0].checkpoint === true);
+  check('endless climb shape (id 0, par null, endless, seed)', e1.id === 0 && e1.name === 'Endless Ascent' && e1.endless === true && e1.par === null && e1.seed === 20261124 && e1.height === e1.rings[e1.rings.length - 1].y);
+  check('endless has no summit ring', !e1.rings.some((r) => r.summit));
+  check('endless has checkpoints', e1.rings.filter((r) => r.checkpoint).length >= 10);
+  check('endless has orbs', e1.orbs.length >= 30);
+  const gaps = e1.rings.slice(1).map((r, i) => r.y - e1.rings[i].y);
+  const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  check('endless gaps grow with height', avg(gaps.slice(-20)) > avg(gaps.slice(0, 20)));
+  check('endless gaps stay in the climbable band', gaps.every((g) => g >= 9 && g <= 12.5));
+  const dec = simulateEndless(20261124, 'decision');
+  check('endless decision bot reaches >= 100m on seed 20261124', dec.maxHeight >= 100);
+  check('endless never wins (no summit)', dec.won === false);
+  const hold = simulateEndless(20261124, 'hold');
+  check('endless hold bot reaches < 25m', hold.maxHeight < 25 && !hold.won);
+  const rand = simulateEndless(20261124, 'random');
+  check('endless random bot reaches < 25m and/or loses', (rand.maxHeight < 25 || rand.lost) && !rand.won);
+  const run = createEndlessRun(20261124);
+  check('createEndlessRun builds an endless run latched to ring 0', run.climb.endless === true && run.attached === 0);
+  const s = defaultSave();
+  check('fresh save has no endless best', s.endlessBest === null);
+  recordEndlessBest(s, { maxHeight: 87.4, score: 1200, seed: 20261124 });
+  check('endless best records height + score + seed', s.endlessBest.height === 87 && s.endlessBest.score === 1200 && s.endlessBest.seed === 20261124);
+  recordEndlessBest(s, { maxHeight: 50, score: 9999, seed: 20261124 });
+  check('a lower endless height does not replace the best', s.endlessBest.height === 87 && s.endlessBest.score === 1200);
+  recordEndlessBest(s, { maxHeight: 120.9, score: 2000, seed: 20261125 });
+  check('a higher endless height replaces the best', s.endlessBest.height === 120 && s.endlessBest.seed === 20261125);
+  const s2 = parseSave(serializeSave(s));
+  check('save round-trip keeps endlessBest', s2.endlessBest.height === 120 && s2.endlessBest.seed === 20261125);
+  check('parseSave drops an invalid endlessBest', parseSave(JSON.stringify({ endlessBest: { height: 'high' } })).endlessBest === null);
+  check('parseSave keeps a valid endlessBest', parseSave(JSON.stringify({ endlessBest: { height: 87, score: 1, seed: 20261124, date: '2026-11-24' } })).endlessBest.height === 87);
 }
 // Swing energy: the meter the HUD, rope and pump tick all read from.
 {

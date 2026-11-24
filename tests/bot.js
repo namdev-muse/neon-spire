@@ -1,9 +1,9 @@
-// Neon Spire v0.1.0 — bot harness gates.
+// Neon Spire v0.4.0 — bot harness gates.
 // The decision bot must clear every climb with real latch/pump/release
 // timing; the bots that must lose (hold grapple forever, no input, random)
 // must lose on every climb. If a hold-one-button bot clears a climb,
 // the climb is not done.
-import { CLIMBS, simulateRun } from '../physics.js';
+import { CLIMBS, simulateRun, simulateEndless } from '../physics.js';
 
 let failed = 0;
 function gate(name, cond, detail = '') {
@@ -64,6 +64,36 @@ for (const climb of CLIMBS) {
     'decision-bot clear time grows with climb number (real curve, no cliff)',
     times.every((t, i) => i === 0 || t > times[i - 1]),
     `times ${times.join('s, ')}s`,
+  );
+}
+
+// Endless Ascent gates (M4): the decision bot climbs far on the
+// fixed seed; the bots that must lose stay near the base. An endless
+// climb never wins — there is no summit ring.
+{
+  const seed = 20261124;
+  const decision = simulateEndless(seed, 'decision');
+  gate(
+    'endless decision bot reaches >= 100m on seed 20261124',
+    decision.maxHeight >= 100,
+    `maxH ${decision.maxHeight}, latches ${decision.latches}, falls ${decision.falls}, time ${decision.time}s`,
+  );
+  gate(
+    'endless decision bot never wins (no summit)',
+    !decision.won,
+    `won=${decision.won}`,
+  );
+  const hold = simulateEndless(seed, 'hold');
+  gate(
+    'endless hold-grapple-forever bot reaches < 25m',
+    hold.maxHeight < 25,
+    `maxH ${hold.maxHeight}`,
+  );
+  const random = simulateEndless(seed, 'random');
+  gate(
+    'endless random-input bot reaches < 25m and/or loses',
+    random.maxHeight < 25 || random.lost,
+    `maxH ${random.maxHeight}, lost=${random.lost}`,
   );
 }
 
