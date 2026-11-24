@@ -1,10 +1,10 @@
-// Neon Spire v0.1.0 — headless browser render check.
+// Neon Spire v0.2.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless
 // browser, and asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract demo
 //     actually climbs — the demo run advances), with no
 //     version/engine text anywhere the player can see, one clear
-//     primary Play action, and 3 climb cards (climb 1 unlocked,
+//     primary Play action, and 12 climb cards (climb 1 unlocked,
 //     climb 2 locked on a fresh save)
 //   - Play starts climb 1 with the HUD; the climber hangs from ring 0
 //   - pumping is asserted in SCREEN space: ArrowLeft moves the
@@ -18,7 +18,7 @@
 //   - pause focuses Resume; Enter resumes; R restarts
 //   - shake 0 suppresses trauma; the rest state settles clean
 //     (trauma 0, FOV 62, time scale 1)
-//   - ?climb=3 reaches climb 3 (public unlock/seed path — Apex lesson)
+//   - ?climb=3 reaches climb 3 and ?climb=12 reaches climb 12 (public unlock/seed path — Apex lesson)
 //   - the canvas pixels actually change during a run
 //   - zero console errors and zero page errors, and a WebGL context exists
 //
@@ -132,8 +132,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__spire.version);
-  if (version !== '0.1.0') throw new Error(`expected version 0.1.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.1.0');
+  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.2.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -145,26 +145,26 @@ try {
   if (!gl) throw new Error('no WebGL context on the game canvas');
   console.log(`render-check: WebGL context live (${gl.width}x${gl.height} canvas)`);
 
-  // The menu: title, one primary Play, 3 climb cards, NO version/engine
+  // The menu: title, one primary Play, 12 climb cards, NO version/engine
   // text anywhere the player can see. Climb 1 unlocked, climb 2 locked.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON SPIRE')) throw new Error('menu title missing');
-  if (menuText.includes('v0.1.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.2.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
   if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
   const climbCards = await page.locator('#climb-select .track-card').count();
-  if (climbCards !== 3) throw new Error(`expected 3 climb cards, got ${climbCards}`);
+  if (climbCards !== 12) throw new Error(`expected 12 climb cards, got ${climbCards}`);
   const climbs = await page.evaluate(() => window.__spire.climbs.map((c) => c.name));
-  if (climbs.length !== 3 || climbs[0] !== 'First Light' || climbs[2] !== 'Vortex Crown') {
+  if (climbs.length !== 12 || climbs[0] !== 'First Light' || climbs[11] !== 'Void Crown') {
     throw new Error(`climb list wrong: ${JSON.stringify(climbs)}`);
   }
   const unlocked = await page.evaluate(() => window.__spire.save.unlocked);
   if (unlocked !== 1) throw new Error(`fresh save should unlock only climb 1, got ${unlocked}`);
   const lockedCards = await page.locator('#climb-select .track-card:disabled').count();
-  if (lockedCards !== 2) throw new Error(`expected 2 locked climb cards on a fresh save, got ${lockedCards}`);
-  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 3 climbs, climb 1 unlocked only');
+  if (lockedCards !== 11) throw new Error(`expected 11 locked climb cards on a fresh save, got ${lockedCards}`);
+  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 12 climbs, climb 1 unlocked only');
 
   // The attract demo climbs behind the menu: the demo run advances.
   const demo0 = await page.evaluate(() => window.__spire.info());
@@ -321,6 +321,16 @@ try {
     throw new Error(`?climb=3 should start Vortex Crown, got ${JSON.stringify({ id: climb3.climbId, name: climb3.climbName })}`);
   }
   console.log('render-check: ?climb=3 jumps straight into Vortex Crown (unlock path works)');
+
+  // ?climb=12 reaches the last climb (Void Crown) — the M2 set must be
+  // reachable through the same public unlock path.
+  await page.goto(`http://127.0.0.1:${port}/?climb=12`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForFunction(() => window.__spire && window.__spire.phase === 'playing', null, { timeout: 30000 });
+  const climb12 = await page.evaluate(() => window.__spire.info());
+  if (climb12.climbId !== 12 || climb12.climbName !== 'Void Crown') {
+    throw new Error(`?climb=12 should start Void Crown, got ${JSON.stringify({ id: climb12.climbId, name: climb12.climbName })}`);
+  }
+  console.log('render-check: ?climb=12 jumps straight into Void Crown (unlock path reaches the last climb)');
 
   if (errors.length > 0) {
     console.error('render-check: console/page errors seen:');

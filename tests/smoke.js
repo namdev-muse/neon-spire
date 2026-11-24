@@ -1,4 +1,4 @@
-// Neon Spire v0.1.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Spire v0.2.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, CLIMBS, climbById, climbThreat, DT, GRAVITY, GRAPPLE_RANGE,
   ROPE_MIN, PUMP_ACCEL, MAX_SWING_SPEED, FALL_LIMIT, MAX_FALLS,
@@ -16,13 +16,13 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.1.0', VERSION === '0.1.0');
-check('3 climbs defined', CLIMBS.length === 3);
-check('climb ids are 1..3 in order', CLIMBS.every((c, i) => c.id === i + 1));
+check('physics version is 0.2.0', VERSION === '0.2.0');
+check('12 climbs defined', CLIMBS.length === 12);
+check('climb ids are 1..12 in order', CLIMBS.every((c, i) => c.id === i + 1));
 check('every climb has a name and a hint', CLIMBS.every((c) => c.name && c.hint));
-check('every climb has a distinct accent', new Set(CLIMBS.map((c) => c.accent)).size === 3);
+check('every climb has a distinct accent', new Set(CLIMBS.map((c) => c.accent)).size === 12);
 check('climbById finds climb 1', climbById(1) && climbById(1).name === 'First Light');
-check('climbById finds climb 3', climbById(3) && climbById(3).name === 'Vortex Crown');
+check('climbById finds climb 12', climbById(12) && climbById(12).name === 'Void Crown');
 check('climbById returns null for unknown id', climbById(99) === null);
 check('every climb has 7+ rings', CLIMBS.every((c) => c.rings.length >= 7));
 check('every climb has a start checkpoint ring', CLIMBS.every((c) => c.rings[0].checkpoint));
