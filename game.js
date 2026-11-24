@@ -517,7 +517,15 @@ function showMenu() {
   hideAllScreens();
   hudEl.classList.add('hidden');
   $('touch-controls').classList.add('hidden');
+  // Hide the toast INSTANTLY on menu entry: removing the 'show' class
+  // alone leaves the 200ms CSS fade, and a live playtest caught the
+  // fall toast still visible over the menu in post-quit screenshots.
+  // A leftover pill on the menu is a bug (Talon lesson), even a fading one.
   toastEl.classList.remove('show');
+  state.toastT = 0;
+  toastEl.style.transition = 'none';
+  toastEl.style.opacity = '0';
+  requestAnimationFrame(() => { toastEl.style.transition = ''; toastEl.style.opacity = ''; });
   renderClimbSelect();
   updateMenuBest();
   openScreen('menu');
@@ -555,7 +563,10 @@ function updateMenuBest() {
   $('menu-endless-best').textContent = save.endlessBest
     ? `Endless best: ${save.endlessBest.height}m`
     : 'Endless Ascent — no run yet';
-  $('menu-hint').textContent = `Climb ${state.climbId} selected — press Play.`;
+  const sel = climbById(state.climbId);
+  $('menu-hint').textContent = sel && !isClimbUnlocked(save, sel.id)
+    ? `Climb ${sel.id} is locked — clear climb ${sel.id - 1} first.`
+    : `Climb ${state.climbId} selected — press Play.`;
 }
 function fmtTime(t) {
   const m = Math.floor(t / 60);
@@ -698,7 +709,7 @@ function startClimb(id, viaParam = false) {
   beginRun(
     startRun(climb.id),
     `${climb.name} — ${climb.hint}`,
-    `Climb ${climb.id}, ${climb.name}. Hold Space to grapple, pump with A and D, release at the top of the arc.`,
+    `Climb ${climb.id}, ${climb.name}. Hold Space or the mouse button to grapple, pump with A and D or drag the mouse, release at the top of the arc.`,
   );
 }
 function startEndless(seed) {
@@ -708,7 +719,7 @@ function startEndless(seed) {
   beginRun(
     createEndlessRun(s),
     'Endless Ascent — climb as high as you can. 5 falls ends the run.',
-    'Endless Ascent. Hold Space to grapple, pump with A and D, release at the top of the arc. Climb as high as you can — 5 falls ends the run.',
+    'Endless Ascent. Hold Space or the mouse button to grapple, pump with A and D or drag the mouse, release at the top of the arc. Climb as high as you can — 5 falls ends the run.',
   );
 }
 // Restart whatever is currently being played: the same endless seed,
