@@ -1,4 +1,4 @@
-// Neon Spire v0.2.1 — headless browser render check.
+// Neon Spire v0.3.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless
 // browser, and asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract demo
@@ -17,7 +17,12 @@
 //     (falls increment), and 5 falls lose the climb
 //   - pause focuses Resume; Enter resumes; R restarts
 //   - shake 0 suppresses trauma; the rest state settles clean
-//     (trauma 0, FOV 62, time scale 1)
+//     (trauma 0, FOV 62, time scale 1, FOV dip 0, camera snap 0)
+//   - M3 feel: pumping fires its feedback bundle (pump ticks on pump
+//     edges while swinging with the motion); the swing meter tracks
+//     swing energy; generative music is active after Play; the
+//     accessibility toggles work (reduce-flashing, text size, high
+//     contrast) and restore cleanly
 //   - ?climb=3 reaches climb 3 and ?climb=12 reaches climb 12 (public unlock/seed path — Apex lesson)
 //   - the canvas pixels actually change during a run
 //   - zero console errors and zero page errors, and a WebGL context exists
@@ -132,8 +137,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__spire.version);
-  if (version !== '0.2.1') throw new Error(`expected version 0.2.1, got ${version}`);
-  console.log('render-check: game module initialised, version 0.2.1');
+  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -149,7 +154,7 @@ try {
   // text anywhere the player can see. Climb 1 unlocked, climb 2 locked.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON SPIRE')) throw new Error('menu title missing');
-  if (menuText.includes('v0.2.1') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.3.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -165,6 +170,31 @@ try {
   const lockedCards = await page.locator('#climb-select .track-card:disabled').count();
   if (lockedCards !== 11) throw new Error(`expected 11 locked climb cards on a fresh save, got ${lockedCards}`);
   console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 12 climbs, climb 1 unlocked only');
+
+  // M3: the accessibility toggles work and restore cleanly.
+  await page.click('#btn-settings');
+  await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+  await page.check('#reduce-flashing');
+  const flashOff = await page.evaluate(() => window.__spire.state.flash);
+  if (flashOff !== false) throw new Error('reduce-flashing should turn state.flash off');
+  await page.selectOption('#text-size-select', '1.2');
+  const fsLarge = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  if (!(fsLarge > 16)) throw new Error(`text size Large should grow the root font, got ${fsLarge}px`);
+  await page.check('#high-contrast-toggle');
+  const hc = await page.evaluate(() => document.body.classList.contains('high-contrast'));
+  if (!hc) throw new Error('high-contrast toggle should add the high-contrast class');
+  await page.uncheck('#reduce-flashing');
+  await page.selectOption('#text-size-select', '1');
+  await page.uncheck('#high-contrast-toggle');
+  const flashBack = await page.evaluate(() => window.__spire.state.flash);
+  if (flashBack !== true) throw new Error('unchecking reduce-flashing should restore flash');
+  const fsBack = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  if (Math.abs(fsBack - 16) > 0.5) throw new Error(`text size should restore to 16px, got ${fsBack}px`);
+  const hcBack = await page.evaluate(() => document.body.classList.contains('high-contrast'));
+  if (hcBack) throw new Error('high-contrast toggle should remove the class when unchecked');
+  await page.click('#btn-settings-close');
+  await page.waitForFunction(() => document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+  console.log('render-check: accessibility toggles work — reduce-flashing, text size, high contrast, all restored');
 
   // The attract demo climbs behind the menu: the demo run advances.
   const demo0 = await page.evaluate(() => window.__spire.info());
@@ -192,6 +222,11 @@ try {
   if (startInfo.attached !== 0) throw new Error(`climber should start latched to ring 0, got attached=${startInfo.attached}`);
   console.log('render-check: PLAY starts climb 1 (First Light), HUD visible, climber latched to ring 0');
 
+  // M3: the generative music starts with the climb.
+  const musicActive = await page.evaluate(() => window.__spire.state.musicActive);
+  if (!musicActive) throw new Error('music should be active after Play');
+  console.log('render-check: generative music active after Play');
+
   // Pumping is asserted in SCREEN space: ArrowLeft must move the
   // climber LEFT on screen relative to the spire axis. The camera
   // follows the player, so the raw screen x barely moves — the
@@ -217,6 +252,35 @@ try {
     return i.screen.x - i.spireScreen.x;
   });
   console.log(`render-check: ArrowLeft pumps the climber left on screen vs the spire (offset ${relX0.toFixed(0)} -> ${relX1.toFixed(0)})`);
+
+  // M3: pumping fires its feedback bundle — a pump tick on each pump
+  // direction edge while swinging WITH the motion — and the swing
+  // meter tracks the energy. Flip the pump direction several times
+  // while grappled (Space is still held); at least one edge must land
+  // with the swing. Sampling the meter as a max over 2s, not an
+  // instant read: swing energy crosses zero at each arc extreme.
+  const ticks0 = await page.evaluate(() => window.__spire.info().pumpTicks);
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.down('ArrowRight');
+    await page.waitForTimeout(700);
+    await page.keyboard.up('ArrowRight');
+    await page.keyboard.down('ArrowLeft');
+    await page.waitForTimeout(700);
+    await page.keyboard.up('ArrowLeft');
+  }
+  const ticks1 = await page.evaluate(() => window.__spire.info().pumpTicks);
+  if (ticks1 <= ticks0) throw new Error(`pump edges should fire pump feedback ticks, got ${ticks0} -> ${ticks1}`);
+  console.log(`render-check: pump feedback fires on pump edges (ticks ${ticks0} -> ${ticks1})`);
+  let maxEnergy = 0;
+  for (let i = 0; i < 10; i++) {
+    const e = await page.evaluate(() => window.__spire.info().swingEnergy);
+    maxEnergy = Math.max(maxEnergy, e);
+    await page.waitForTimeout(200);
+  }
+  if (maxEnergy <= 0.15) throw new Error(`swing energy should build while pumping, max sampled ${maxEnergy}`);
+  const meterW = await page.evaluate(() => document.getElementById('hud-swing-fill').style.width);
+  if (!meterW || parseFloat(meterW) <= 0) throw new Error(`swing meter should show energy, fill width is ${meterW}`);
+  console.log(`render-check: swing meter tracks swing energy (max ${maxEnergy.toFixed(2)}, fill ${meterW})`);
 
   // Release: letting go of Space detaches the rope; holding Space
   // again latches a ring mid-flight.
@@ -304,14 +368,16 @@ try {
   console.log(`render-check: gameplay screenshot saved to ${SHOTS_DIR}/gameplay-1280x720.png — INSPECT BY EYE (3D depth, spire, HUD)`);
   await page.evaluate(() => window.__spire.autopilot(false));
 
-  // Rest state settles clean (trauma 0, FOV 62, time scale 1).
+  // Rest state settles clean (trauma 0, FOV 62, time scale 1, FOV dip 0, camera snap 0).
   await page.evaluate(() => window.__spire.quitToMenu());
   await page.waitForTimeout(1500);
   const rest = await page.evaluate(() => window.__spire.info());
   if (rest.trauma !== 0) throw new Error(`rest state trauma should be 0, got ${rest.trauma}`);
   if (Math.abs(rest.fov - 62) > 0.5) throw new Error(`rest state FOV should be 62, got ${rest.fov}`);
   if (rest.timeScale !== 1) throw new Error(`rest state timeScale should be 1, got ${rest.timeScale}`);
-  console.log('render-check: rest state clean (trauma 0, FOV 62, timeScale 1)');
+  if (rest.fovDip !== 0) throw new Error(`rest state fovDip should be 0, got ${rest.fovDip}`);
+  if (rest.camSnapT !== 0) throw new Error(`rest state camSnapT should be 0, got ${rest.camSnapT}`);
+  console.log('render-check: rest state clean (trauma 0, FOV 62, timeScale 1, fovDip 0, camSnapT 0)');
 
   // ?climb=3 reaches climb 3 (public unlock/seed path — Apex lesson).
   await page.goto(`http://127.0.0.1:${port}/?climb=3`, { waitUntil: 'domcontentloaded', timeout: 30000 });

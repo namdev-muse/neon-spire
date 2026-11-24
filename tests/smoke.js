@@ -1,9 +1,9 @@
-// Neon Spire v0.2.1 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Spire v0.3.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, CLIMBS, climbById, climbThreat, DT, GRAVITY, GRAPPLE_RANGE,
   ROPE_MIN, PUMP_ACCEL, MAX_SWING_SPEED, FALL_LIMIT, MAX_FALLS,
   FACE_Z, createRun, startRun, stepRun, nextRing, latchTarget,
-  swingTangent, swingSpeed, noInputPolicy, holdPolicy, randomPolicy,
+  swingTangent, swingSpeed, swingEnergy, noInputPolicy, holdPolicy, randomPolicy,
   decisionPolicy, simulateRun, defaultSave, serializeSave, parseSave,
   recordBest, isClimbUnlocked, rankFor, FEEDBACK, FEEDBACK_TIERS, FEEDBACK_LAYERS,
 } from '../physics.js';
@@ -16,7 +16,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.2.1', VERSION === '0.2.1');
+check('physics version is 0.3.0', VERSION === '0.3.0');
 check('12 climbs defined', CLIMBS.length === 12);
 check('climb ids are 1..12 in order', CLIMBS.every((c, i) => c.id === i + 1));
 check('every climb has a name and a hint', CLIMBS.every((c) => c.name && c.hint));
@@ -224,9 +224,42 @@ check('startRun returns null for unknown climb', startRun(99) === null);
     return !s3.best[1];
   })());
 }
+// Swing energy: the meter the HUD, rope and pump tick all read from.
+{
+  const r = startRun(1);
+  check('swing energy is 0 at rest', swingEnergy(r) === 0);
+  for (let i = 0; i < 120; i++) stepRun(r, { grapple: true, pump: swingSpeed(r) >= 0 ? 1 : -1 });
+  const e = swingEnergy(r);
+  check('swing energy rises as the swing builds', e > 0.2 && e <= 1);
+  for (let i = 0; i < 1800; i++) stepRun(r, { grapple: true, pump: swingSpeed(r) >= 0 ? 1 : -1 });
+  check('swing energy never exceeds 1 (capped by the swing cap)', swingEnergy(r) <= 1);
+  const r2 = startRun(1);
+  r2.attached = null;
+  check('swing energy is 0 while airborne (no swing to measure)', swingEnergy(r2) === 0);
+}
 // Feedback table is complete and tiered.
 check('feedback events exist for every game event',
-  ['latch', 'release', 'orb', 'fall', 'summit', 'denied'].every((e) => !!FEEDBACK[e]));
+  ['latch', 'pump', 'release', 'orb', 'fall', 'summit', 'denied'].every((e) => !!FEEDBACK[e]));
+check('every feedback entry carries a full bundle (sfx, particles, trauma, hit-stop, flash)',
+  Object.values(FEEDBACK).every((fb) =>
+    typeof fb.sfx === 'string' && fb.sfx.length > 0 &&
+    Number.isInteger(fb.particles) && fb.particles >= 0 &&
+    fb.trauma >= 0 && fb.trauma <= 1 &&
+    fb.hitStop >= 0 && fb.hitStop <= 0.15 &&
+    fb.flash >= 0 && fb.flash <= 0.2));
+check('feedback tiers match the game-feel skill ranges',
+  FEEDBACK_TIERS.small.trauma[0] === 0.1 && FEEDBACK_TIERS.small.trauma[1] === 0.2 && FEEDBACK_TIERS.small.hitStop === 0 &&
+  FEEDBACK_TIERS.medium.trauma[0] === 0.3 && FEEDBACK_TIERS.medium.trauma[1] === 0.5 &&
+  FEEDBACK_TIERS.medium.hitStop[0] === 0.04 && FEEDBACK_TIERS.medium.hitStop[1] === 0.06 &&
+  FEEDBACK_TIERS.large.trauma[0] === 0.7 && FEEDBACK_TIERS.large.trauma[1] === 1.0 &&
+  FEEDBACK_TIERS.large.hitStop[0] === 0.1 && FEEDBACK_TIERS.large.hitStop[1] === 0.15);
+check('every feedback event sits inside its tier (trauma within the matching tier band)',
+  FEEDBACK.latch.trauma <= FEEDBACK_TIERS.small.trauma[1] &&
+  FEEDBACK.pump.trauma <= FEEDBACK_TIERS.small.trauma[1] &&
+  FEEDBACK.release.trauma <= FEEDBACK_TIERS.medium.trauma[1] &&
+  FEEDBACK.fall.trauma >= FEEDBACK_TIERS.medium.trauma[0] && FEEDBACK.fall.trauma <= FEEDBACK_TIERS.medium.trauma[1] &&
+  FEEDBACK.fall.hitStop >= FEEDBACK_TIERS.medium.hitStop[0] && FEEDBACK.fall.hitStop <= FEEDBACK_TIERS.medium.hitStop[1] &&
+  FEEDBACK.summit.trauma >= FEEDBACK_TIERS.large.trauma[0] && FEEDBACK.summit.hitStop >= FEEDBACK_TIERS.large.hitStop[0]);
 check('feedback tiers cover small/medium/large',
   !!FEEDBACK_TIERS.small && !!FEEDBACK_TIERS.medium && !!FEEDBACK_TIERS.large);
 check('feedback layers list sound, particles, shake, flash, number-pop',
