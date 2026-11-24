@@ -1,5 +1,28 @@
 # Neon Spire — devlog
 
+## v0.3.0 — M3 feel & juice (milestone run, Tue 2026-11-24 17:30 +07)
+
+A traversal/feedback pass over the whole swing loop — no new climbs, no new modes, just making the existing game feel like a game.
+
+- **Pump feedback finally fires.** `FEEDBACK.pump` existed since M1 but nothing ever called it — the core interaction (pumping) was silent and invisible. Now every pump-direction edge while swinging *with* the motion fires the small bundle: a tick whose pitch rises with swing energy (520→940 Hz), 2 spark particles at the climber, 0.05 trauma. Pumping *against* the swing stays silent — braking should feel like braking. Render check asserts ticks 1→4 across pump flips.
+- **Swing-energy readout (Talon lesson).** New `swingEnergy(run)` in physics (0..1, capped by the swing cap): a SWING meter in the HUD, the rope heating cyan→gold with energy, the climber halo swelling with energy. No marker, no cue — it shows how much swing you carry, never when to release. Smoke asserts energy 0 at rest, rising with the swing, capped at 1, 0 while airborne.
+- **Generative music.** The static 2-osc pad is now a sequencer: Am–F–C–G at 104 BPM, bass pulse + soft arpeggio scheduled from the frame loop with a 0.25s lookahead on the audio clock. The pad filter opens (420→940 Hz) and the arpeggio lifts an octave past halfway up the climb, so the music climbs with you. Render check asserts music is active after Play.
+- **Camera polish.** Latch snap: for 0.18s after a latch the camera locks onto the new anchor much harder than the soft follow, plus a brief FOV dip (−2.4°). Hard latch (|swingSpeed| > 0.7 of cap): 0.04s hit-stop + gold particle burst + low thud on top of the latch bundle.
+- **Feedback tier audit.** Smoke now asserts every FEEDBACK entry carries a full bundle (sfx, particles, trauma 0..1, hit-stop 0..0.15, flash 0..0.2) and each event sits inside its game-feel tier. One real fix from the audit: fall trauma was 0.55, above the skill's medium tier (0.30–0.50) — set to 0.5, the tier top.
+- **Accessibility toggles verified.** Render check now opens Settings and asserts reduce-flashing turns `state.flash` off, text-size Large grows the root font, high-contrast adds the body class — and all three restore cleanly. Rest-state check extended: FOV dip 0 and camera snap 0 after quit-to-menu.
+
+### Test totals
+
+- Smoke: **72/72 PASS** (was 65; +7: swing energy ×4, feedback completeness ×2, tier bands ×1).
+- Bot gates: **all pass** — decision clears 12/12 (11.77→60.48s, 0 falls), hold/none/random lose all 12; curve unchanged (no physics changes beyond the fall-trauma number, which is feel-only).
+- Render check (headless Chromium): **PASS** — everything M2 asserted, plus accessibility toggles, generative music active after Play, pump ticks 1→4, swing meter tracking energy (max 0.64 sampled, fill 17% at the sampled instant), autopilot clears climb 1 live (23.72s, 2 falls under slow frames), rest state clean (trauma 0, FOV 62, timeScale 1, fovDip 0, camSnapT 0), zero console/page errors.
+- Size sweep: **PASS** — 1280x720, 2560x1080, 1080x2340, menu + gameplay at each size, all 6 shots inspected by eye. HUD fits at every size; the SWING meter reads at every size. Portrait gameplay keeps the known large vertical empty bands (M5 item).
+
+### Carried to M4 / M5
+
+- Portrait framing leaves large vertical empty bands (M5 item).
+- Music/SFX never had a human-ear check (the live playtest below is the first ear on the new music).
+
 ## v0.2.1 — M2 hotfix (same run, Tue 2026-11-24 ~16:30 +07)
 
 Live playtest of v0.2.0 found one real defect: Try Again was dead after losing a deep-linked locked climb (`?climb=12`). Root cause: the retry buttons (Try Again, Climb Again, pause Restart, R) called `startClimb(id)` with `viaParam=false`, so the retry re-checked the lock the deep link had bypassed — the denied toast fired behind the Climb Lost panel and nothing happened. Fix: in-run retry/restart passes `viaParam=true` — the lock gates menu entry only; once you are playing a climb, retrying it is not a new entry. Also fixed two cosmetics from the same playtest: the game-over panel could read "Reached -1m" (maxHeight starts at −0.5; now clamped to ≥ 0) and the "Fell back to the checkpoint" toast lingered over the game-over panel (endClimb now clears transient UI state on run end — Talon lesson). Regression test added to the render check: force a loss on `?climb=12`, assert the panel shows a non-negative height, the toast is cleared, and Try Again restarts climb 12 fresh.
