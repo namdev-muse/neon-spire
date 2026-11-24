@@ -1,4 +1,4 @@
-// Neon Spire v0.5.0 — size sweep: menu + settings + gameplay + pause
+// Neon Spire v1.0.0 — size sweep: menu + settings + gameplay + pause
 // screenshots at 1280x720, 2560x1080 and 1080x2340, plus a climb-5
 // framing shot and an Endless Ascent shot, for inspection by eye.
 // Same serving + Three.js-fulfilment setup as tests/render-check.js.
