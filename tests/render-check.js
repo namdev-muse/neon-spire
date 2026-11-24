@@ -1,0 +1,338 @@
+// Neon Spire v0.1.0 — headless browser render check.
+// Serves the game dir over local HTTP, loads it in a headless
+// browser, and asserts the M1 core, by hook and by eye:
+//   - the menu renders over a LIVE 3D scene (the attract demo
+//     actually climbs — the demo run advances), with no
+//     version/engine text anywhere the player can see, one clear
+//     primary Play action, and 3 climb cards (climb 1 unlocked,
+//     climb 2 locked on a fresh save)
+//   - Play starts climb 1 with the HUD; the climber hangs from ring 0
+//   - pumping is asserted in SCREEN space: ArrowLeft moves the
+//     climber LEFT on screen relative to the spire (the Drift M2
+//     lesson — a mirrored input bug survived every world-space test)
+//   - releasing Space detaches the rope; holding Space again latches
+//     a ring mid-flight
+//   - the autopilot (decision bot) clears climb 1 in the real browser
+//   - with no input the climber falls and respawns at the checkpoint
+//     (falls increment), and 5 falls lose the climb
+//   - pause focuses Resume; Enter resumes; R restarts
+//   - shake 0 suppresses trauma; the rest state settles clean
+//     (trauma 0, FOV 62, time scale 1)
+//   - ?climb=3 reaches climb 3 (public unlock/seed path — Apex lesson)
+//   - the canvas pixels actually change during a run
+//   - zero console errors and zero page errors, and a WebGL context exists
+//
+// Run: node tests/render-check.js
+//
+// CDN note: the repo pins Three.js 0.160.0 from jsdelivr and does NOT
+// vendor it. The sandboxed browser cannot reach the jsdelivr CDN (the VM
+// egress proxy answers policy_denied to every non-curl/wget client,
+// including Chromium), even though curl gets HTTP 200 for the pinned
+// URL from this VM. So this check downloads the pinned module with
+// curl into the OS temp dir and fulfils that one request locally via
+// page.route. The shipped game still loads Three.js from the CDN.
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
+
+const GAME_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SHOTS_DIR = path.join(os.tmpdir(), 'neon-spire-render-check');
+const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const THREE_CACHE = path.join(os.tmpdir(), 'neon-spire-three-0.160.0.module.js');
+
+async function fetchThreeModule() {
+  try {
+    const st = fs.statSync(THREE_CACHE);
+    if (st.size > 100000) return THREE_CACHE;
+  } catch { /* not cached yet */ }
+  await new Promise((resolve, reject) => {
+    execFile('curl', ['-s', '-o', THREE_CACHE, THREE_URL], (err) => (err ? reject(err) : resolve()));
+  });
+  const st = fs.statSync(THREE_CACHE);
+  if (st.size < 100000) throw new Error(`downloaded Three.js module is unexpectedly small (${st.size} bytes)`);
+  return THREE_CACHE;
+}
+
+const MIME = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json',
+};
+
+function findHeadlessShell() {
+  const base = path.join(os.homedir(), '.cache', 'ms-playwright');
+  try {
+    for (const entry of fs.readdirSync(base)) {
+      const candidate = path.join(base, entry, 'chrome-headless-shell-linux64', 'chrome-headless-shell');
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch { /* cache dir missing */ }
+  return null;
+}
+
+const server = http.createServer((req, res) => {
+  const urlPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  const file = path.join(GAME_DIR, urlPath === '/' ? 'index.html' : urlPath);
+  if (!file.startsWith(GAME_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    res.writeHead(404);
+    res.end('not found');
+    return;
+  }
+  res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+});
+
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const port = server.address().port;
+
+const require = createRequire(import.meta.url);
+const playwrightPath = fileURLToPath(new URL('../../neon-hexfall/node_modules/playwright-core', import.meta.url));
+const { chromium } = require(playwrightPath);
+const executablePath = findHeadlessShell();
+console.log('render-check: chromium executable:', executablePath || '(playwright default)');
+
+const errors = [];
+const T0 = Date.now();
+const stamp = () => ((Date.now() - T0) / 1000).toFixed(1) + 's';
+let browser;
+try {
+  browser = await chromium.launch({
+    ...(executablePath ? { executablePath } : {}),
+    args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+  });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 720 },
+    timezoneId: 'Asia/Bangkok',
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(stamp() + ' console: ' + msg.text()); });
+  page.on('pageerror', (err) => errors.push(stamp() + ' pageerror: ' + String(err)));
+
+  if (!process.env.NO_THREE_CACHE) {
+    const cached = await fetchThreeModule();
+    console.log(`render-check: fulfilling pinned three@0.160.0 from local curl cache (${cached}) — sandboxed browser cannot reach jsdelivr directly`);
+    await page.route(THREE_URL, (route) => route.fulfill({ path: cached }));
+  }
+
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+  try {
+    await page.waitForFunction(() => window.__spire, null, { timeout: 30000 });
+  } catch {
+    console.error('render-check: window.__spire never appeared — the pinned Three.js module failed to load.');
+    console.error('CDN check from this VM: curl -sI ' + THREE_URL + ' (expect HTTP 200).');
+    throw new Error('game module did not initialise (see CDN note above)');
+  }
+
+  const version = await page.evaluate(() => window.__spire.version);
+  if (version !== '0.1.0') throw new Error(`expected version 0.1.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.1.0');
+
+  // WebGL context exists and the canvas is on screen.
+  const gl = await page.evaluate(() => {
+    const canvas = document.querySelector('#game-container canvas');
+    if (!canvas) return null;
+    const ctx = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    return ctx ? { width: canvas.width, height: canvas.height } : null;
+  });
+  if (!gl) throw new Error('no WebGL context on the game canvas');
+  console.log(`render-check: WebGL context live (${gl.width}x${gl.height} canvas)`);
+
+  // The menu: title, one primary Play, 3 climb cards, NO version/engine
+  // text anywhere the player can see. Climb 1 unlocked, climb 2 locked.
+  const menuText = await page.textContent('#menu');
+  if (!menuText.includes('NEON SPIRE')) throw new Error('menu title missing');
+  if (menuText.includes('v0.1.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+    throw new Error('menu shows version/engine text — it must live in the README only');
+  }
+  const playClass = await page.getAttribute('#btn-play', 'class');
+  if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
+  const climbCards = await page.locator('#climb-select .track-card').count();
+  if (climbCards !== 3) throw new Error(`expected 3 climb cards, got ${climbCards}`);
+  const climbs = await page.evaluate(() => window.__spire.climbs.map((c) => c.name));
+  if (climbs.length !== 3 || climbs[0] !== 'First Light' || climbs[2] !== 'Vortex Crown') {
+    throw new Error(`climb list wrong: ${JSON.stringify(climbs)}`);
+  }
+  const unlocked = await page.evaluate(() => window.__spire.save.unlocked);
+  if (unlocked !== 1) throw new Error(`fresh save should unlock only climb 1, got ${unlocked}`);
+  const lockedCards = await page.locator('#climb-select .track-card:disabled').count();
+  if (lockedCards !== 2) throw new Error(`expected 2 locked climb cards on a fresh save, got ${lockedCards}`);
+  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 3 climbs, climb 1 unlocked only');
+
+  // The attract demo climbs behind the menu: the demo run advances.
+  const demo0 = await page.evaluate(() => window.__spire.info());
+  if (!demo0) throw new Error('no demo info in the menu phase');
+  await page.waitForFunction((t0) => {
+    const i = window.__spire.info();
+    return i && i.time > t0 + 5;
+  }, demo0.time, { timeout: 60000 });
+  const demo1 = await page.evaluate(() => window.__spire.info());
+  console.log(`render-check: attract demo alive — demo climber swinging (t ${demo0.time.toFixed(1)} -> ${demo1.time.toFixed(1)}, height ${demo1.maxHeight.toFixed(1)}m)`);
+
+  // Menu screenshot for the by-eye check.
+  fs.mkdirSync(SHOTS_DIR, { recursive: true });
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'menu-1280x720.png'), timeout: 60000 });
+  console.log(`render-check: menu screenshot saved to ${SHOTS_DIR}/menu-1280x720.png — INSPECT BY EYE (live 3D scene, no clipped cards)`);
+
+  // PLAY starts climb 1 with the HUD; the climber hangs from ring 0.
+  await page.click('#btn-play');
+  await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
+  if (!await page.isVisible('#hud')) throw new Error('HUD not visible after PLAY');
+  const hudClimb = await page.textContent('#hud-climb');
+  if (!hudClimb.includes('First Light')) throw new Error(`expected climb 1 First Light, got: ${hudClimb}`);
+  const startInfo = await page.evaluate(() => window.__spire.info());
+  if (startInfo.attached !== 0) throw new Error(`climber should start latched to ring 0, got attached=${startInfo.attached}`);
+  console.log('render-check: PLAY starts climb 1 (First Light), HUD visible, climber latched to ring 0');
+
+  // Pumping is asserted in SCREEN space: ArrowLeft must move the
+  // climber LEFT on screen relative to the spire axis. The camera
+  // follows the player, so the raw screen x barely moves — the
+  // climber-vs-spire offset is the real screen-space signal.
+  // Hold Space (grapple) + ArrowLeft (pump) and poll for the offset
+  // to swing 20px left.
+  const relX0 = await page.evaluate(() => {
+    const i = window.__spire.info();
+    return i.screen.x - i.spireScreen.x;
+  });
+  await page.keyboard.down('Space');
+  await page.keyboard.down('ArrowLeft');
+  try {
+    await page.waitForFunction((x0) => {
+      const i = window.__spire.info();
+      return i && (i.screen.x - i.spireScreen.x) < x0 - 20;
+    }, relX0, { timeout: 30000 });
+  } finally {
+    await page.keyboard.up('ArrowLeft');
+  }
+  const relX1 = await page.evaluate(() => {
+    const i = window.__spire.info();
+    return i.screen.x - i.spireScreen.x;
+  });
+  console.log(`render-check: ArrowLeft pumps the climber left on screen vs the spire (offset ${relX0.toFixed(0)} -> ${relX1.toFixed(0)})`);
+
+  // Release: letting go of Space detaches the rope; holding Space
+  // again latches a ring mid-flight.
+  await page.keyboard.up('Space');
+  await page.waitForFunction(() => {
+    const i = window.__spire.info();
+    return i && i.attached === null;
+  }, null, { timeout: 5000 });
+  console.log('render-check: releasing Space detaches the rope (airborne)');
+  await page.keyboard.down('Space');
+  await page.waitForFunction(() => {
+    const i = window.__spire.info();
+    return i && i.attached !== null;
+  }, null, { timeout: 10000 });
+  await page.keyboard.up('Space');
+  const relatch = await page.evaluate(() => window.__spire.info());
+  console.log(`render-check: holding Space again latches a ring mid-flight (attached=${relatch.attached})`);
+
+  // Shake 0 suppresses trauma: latch while shake is 0, trauma stays 0.
+  // (First let leftover trauma from the release/re-latch above settle.)
+  await page.evaluate(() => window.__spire.setShake(0));
+  await page.waitForFunction(() => window.__spire.info().trauma === 0, null, { timeout: 30000 });
+  const latches0 = await page.evaluate(() => window.__spire.info().latches);
+  await page.evaluate(() => window.__spire.autopilot(true));
+  await page.waitForFunction((l0) => window.__spire.info().latches > l0, latches0, { timeout: 60000 });
+  const trauma0 = await page.evaluate(() => window.__spire.info().trauma);
+  if (trauma0 !== 0) throw new Error(`shake 0 should suppress trauma, got ${trauma0}`);
+  await page.evaluate(() => window.__spire.setShake(100));
+  console.log('render-check: shake 0 suppresses trauma (0 after a latch)');
+
+  // The autopilot (decision bot) clears climb 1 in the real browser.
+  await page.waitForFunction(() => window.__spire.phase === 'complete', null, { timeout: 180000 });
+  const clearInfo = await page.evaluate(() => window.__spire.info());
+  console.log(`render-check: autopilot cleared climb 1 live (score ${clearInfo.score}, time ${clearInfo.time}s, falls ${clearInfo.falls})`);
+  if (!await page.isVisible('#complete')) throw new Error('complete screen not visible after the clear');
+  const completeText = await page.textContent('#complete');
+  if (!completeText.includes('Summit Reached')) throw new Error('complete screen title wrong');
+  console.log('render-check: Summit Reached screen shows with score + rank');
+
+  // Back to the menu, then start climb 1 again with NO input: the
+  // climber releases, falls, and respawns at the checkpoint.
+  await page.click('#btn-menu-complete');
+  await page.waitForFunction(() => window.__spire.phase === 'menu', null, { timeout: 5000 });
+  await page.click('#btn-play');
+  await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
+  await page.waitForFunction(() => {
+    const i = window.__spire.info();
+    return i && i.falls >= 1;
+  }, null, { timeout: 60000 });
+  const fallInfo = await page.evaluate(() => window.__spire.info());
+  console.log(`render-check: no-input climber falls and respawns at the checkpoint (falls ${fallInfo.falls})`);
+  // 5 falls lose the climb (no input keeps releasing after every respawn).
+  await page.waitForFunction(() => window.__spire.phase === 'gameover', null, { timeout: 120000 });
+  if (!await page.isVisible('#gameover')) throw new Error('game-over screen not visible after 5 falls');
+  console.log('render-check: 5 falls lose the climb — Climb Lost screen shows');
+
+  // Pause focuses Resume; Enter resumes; R restarts.
+  await page.click('#btn-retry');
+  await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
+  await page.keyboard.press('KeyP');
+  await page.waitForFunction(() => window.__spire.phase === 'paused', null, { timeout: 5000 });
+  if (!await page.isVisible('#pause')) throw new Error('pause screen not visible');
+  const focused = await page.evaluate(() => document.activeElement && document.activeElement.id);
+  if (focused !== 'btn-resume') throw new Error(`pause should focus Resume, focused ${focused}`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
+  console.log('render-check: pause focuses Resume, Enter resumes');
+  await page.keyboard.press('KeyR');
+  await page.waitForTimeout(500);
+  const afterRestart = await page.evaluate(() => window.__spire.info());
+  if (afterRestart.time > 2 || afterRestart.falls !== 0) throw new Error(`R should restart the climb (time ${afterRestart.time}, falls ${afterRestart.falls})`);
+  console.log('render-check: R restarts the climb');
+
+  // The canvas must actually update during a run.
+  const shotA = await page.screenshot({ timeout: 60000 });
+  await page.waitForTimeout(1000);
+  const shotB = await page.screenshot({ timeout: 60000 });
+  if (shotA.equals(shotB)) throw new Error('canvas did not change between two screenshots during a run — the render loop may be frozen');
+  console.log('render-check: canvas updates during a run (two screenshots differ)');
+
+  // Gameplay screenshot for the by-eye check.
+  await page.evaluate(() => window.__spire.autopilot(true));
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'gameplay-1280x720.png'), timeout: 60000 });
+  console.log(`render-check: gameplay screenshot saved to ${SHOTS_DIR}/gameplay-1280x720.png — INSPECT BY EYE (3D depth, spire, HUD)`);
+  await page.evaluate(() => window.__spire.autopilot(false));
+
+  // Rest state settles clean (trauma 0, FOV 62, time scale 1).
+  await page.evaluate(() => window.__spire.quitToMenu());
+  await page.waitForTimeout(1500);
+  const rest = await page.evaluate(() => window.__spire.info());
+  if (rest.trauma !== 0) throw new Error(`rest state trauma should be 0, got ${rest.trauma}`);
+  if (Math.abs(rest.fov - 62) > 0.5) throw new Error(`rest state FOV should be 62, got ${rest.fov}`);
+  if (rest.timeScale !== 1) throw new Error(`rest state timeScale should be 1, got ${rest.timeScale}`);
+  console.log('render-check: rest state clean (trauma 0, FOV 62, timeScale 1)');
+
+  // ?climb=3 reaches climb 3 (public unlock/seed path — Apex lesson).
+  await page.goto(`http://127.0.0.1:${port}/?climb=3`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForFunction(() => window.__spire && window.__spire.phase === 'playing', null, { timeout: 30000 });
+  const climb3 = await page.evaluate(() => window.__spire.info());
+  if (climb3.climbId !== 3 || climb3.climbName !== 'Vortex Crown') {
+    throw new Error(`?climb=3 should start Vortex Crown, got ${JSON.stringify({ id: climb3.climbId, name: climb3.climbName })}`);
+  }
+  console.log('render-check: ?climb=3 jumps straight into Vortex Crown (unlock path works)');
+
+  if (errors.length > 0) {
+    console.error('render-check: console/page errors seen:');
+    errors.forEach((e) => console.error('  ' + e));
+    throw new Error(`${errors.length} console/page error(s) during the check`);
+  }
+  console.log('render-check: PASS — zero console errors, zero page errors');
+} catch (err) {
+  console.error('render-check: FAIL —', err.message);
+  if (errors.length > 0) errors.forEach((e) => console.error('  ' + e));
+  process.exitCode = 1;
+} finally {
+  if (browser) await browser.close();
+  server.close();
+}
