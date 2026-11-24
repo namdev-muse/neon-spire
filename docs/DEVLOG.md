@@ -1,5 +1,34 @@
 # Neon Spire — devlog
 
+## v0.5.0 — M5 polish & robustness (milestone run, Tue 2026-11-24 21:30 +07)
+
+A polish pass over the M1–M4 carries — no new climbs, no new modes, no physics changes, no climb-data changes. Every fix is small and surgical.
+
+- **endClimb setTimeout race (real bug, M3 carry).** Losing a climb scheduled `endClimb(false)` 600ms later (900ms on a win) with no handle on the timer: quitting to the menu inside that window let the timeout fire and open the game-over panel over the menu. The timer id now lives on `state.endTimer`, is cleared in `quitToMenu()` and when a new run begins, and `endClimb()` no-ops when the phase is already the menu. Regression test in the render check drives the real loss path, quits inside the window, and asserts the timer is cleared and no game-over panel appears. (The M3 toast-lingering claim was refuted by probe; this one was a real race in the same code path.)
+- **HUD pill backdrops (M3 carry).** Each HUD group (`.hud-left` / `.hud-mid` / `.hud-right`) now sits on a subtle semi-transparent panel (blur, border, radius, padding) so the text reads over bright neon rings. Pointer events unchanged — only the buttons take input.
+- **Height shows peak (M4 carry).** The HUD height is `maxHeight`, not the current height; it is now labelled honestly: `Peak Xm / Ym` on climbs, `Peak Xm` in Endless Ascent. Render-check regex updated (`/^Peak \d+m$/` for endless, `/^Peak \d+m \/ 60m$/` for climb 1).
+- **Game-over dialog layout (M1 carry).** `#gameover-detail` no longer uses the `big-score` class (1.6rem gold) for a full sentence — it has its own class at normal size and weight, so the dialog layout is stable. The complete screen is untouched. Render check asserts the detail's computed font size is normal text.
+- **How to Play wording.** The touch line said "tap ◀ / ▶ to pump" — the pump buttons are hold buttons, so it now says "hold ◀ / ▶ to pump". The Controls line now documents mouse-drag pumping ("drag mouse left/right: pump"); mouse grapple was already documented and stays so. README controls updated to match.
+- **FPS guard (new, M5 performance scope).** Adapted from Surge's established pattern, minimally: a rolling FPS average in the frame loop; sustained <28fps for 2s steps the renderer pixel ratio down one rung (2 → 1.5 → 1, via `setPixelRatio` + `setSize`) and reduces particle spawn (1 → 0.6 → 0.35). One-way only, never oscillates back up. Antialiasing is untouched (fixed at creation) and physics is untouched. Guard state (`dprCap`, pixel ratio, particle scale, fps) is exposed in `window.__spire.info()` plus a `triggerFpsGuard()` hook; the render check asserts the state is present, the cap steps down on demand, and the renderer keeps working.
+- **Climb-5 framing + camera diagonal (M3/M4 cosmetic carry).** A/B probe at the same trigger (autopilot first reaching 20m on climb 5): before, the spire leaned ~25° across the frame and the route above the climber left the frame; the cause was the look target tracking the climber's lateral factor (0.8) while the camera tracked 0.55. One-line fix — the look target now uses the camera's own factor (0.55), so the camera looks straight up the face plane. After: the spire reads as a tower (~8° lean at a wide swing), three rings of the route stay in frame, climber and rope still read clearly. No physics or ring-data change. Screenshots.js now takes a climb-5 framing shot every run.
+- **Settings empty area (M3 carry).** Measured, not assumed: at 2560x1080 the settings panel is 680×428 with content height 426 — there is no empty area *inside* the panel; the space around it is the standard centred overlay. The panel still gained one real row: a read-only **Performance** line showing live fps and the FPS guard's render scale (refreshed while Settings is open), which fits M5 and gives the guard a visible readout. Render check asserts the line's format.
+- **Transient HUD clip frame (M4 carry).** Not reproduced: the size sweep (14 shots, all three resolutions, menu + settings + gameplay + pause) shows no HUD clipping at any resolution after the backdrop change; the single clipped frame in M4 was a mid-shake transient. Logged as not reproduced.
+
+### Test totals
+
+- Smoke: **102/102 PASS** (unchanged — no physics changes, no new smoke assertions needed; M5 is render-check scope).
+- Bot gates: **all pass** — decision clears 12/12 (11.77→60.48s, 0 falls); hold/none/random lose all 12; endless gates unchanged (decision 355.9m, hold 4.5m, random 1.6m).
+- Render check (headless Chromium): **PASS** — everything M4 asserted, plus FPS guard present and stepping, Peak label on climb + endless HUD, HUD pill backdrops (computed style), game-over detail at normal text size, settings performance line, endClimb race regression (quit inside the 600ms loss window → menu clean, timer cleared), zero console/page errors.
+- Size sweep: **PASS** — 14 shots inspected by eye (menu + settings + gameplay + pause at 1280x720, 2560x1080, 1080x2340, plus endless + climb-5 at 1280x720). No clipping, no overlap, no empty in-panel area; HUD reads at every size; portrait keeps the known large vertical empty bands (carried to M6).
+- Firefox cross-browser check: **could not run — environment limit, not a game defect.** The Playwright Firefox build (firefox-1572) launches but cannot create a WebGL context in this VM at all ("AllowWebgl2:false restricts context creation on this system", "Exhausted GL driver options"), even with `webgl.force-enabled` / software-WebGL prefs forced; Chromium works via SwiftShader, Firefox has no software-GL fallback here. The game handles a missing WebGL context gracefully (it shows the in-page "3D graphics couldn't start" message). Firefox on a real machine remains unverified — carried to M6.
+
+### Carried to M6
+
+- Portrait framing leaves large vertical empty bands (same caveat class as Apex/Bastion).
+- Music/SFX never had a human-ear check.
+- Endless Ascent's live autopilot climb is verified to 25m in the render check; the 100m+ heights are sim-bot evidence only.
+- The live playtester has still never completed a ring-to-ring transfer or a full climb in a real browser (tooling ceiling) — transfer evidence is sim bot + live autopilot + CI harness; the rank badge is render-check verified.
+
 ## v0.4.0 — M4 progression & depth (milestone run, Tue 2026-11-24 19:30 +07)
 
 Two systems, both complete: a second mode and per-climb ranks.
