@@ -532,13 +532,26 @@ try {
   await page.waitForFunction(() => window.__spire.run && window.__spire.run.phase === 'lost', null, { timeout: 60000, polling: 50 });
   const timerPending = await page.evaluate(() => window.__spire.info().endTimerPending);
   if (!timerPending) throw new Error('expected a pending endClimb timer right after the loss');
+  // M5 follow-up (live playtest): the fall toast must be showing at quit
+  // time (test setup) — it is the toast the menu must hide instantly.
+  const toastWasShowing = await page.evaluate(() => document.getElementById('hud-toast').classList.contains('show'));
+  if (!toastWasShowing) throw new Error('expected the fall toast to be showing at quit time (test setup)');
   await page.evaluate(() => window.__spire.quitToMenu());
+  // Removing the 'show' class alone leaves the 200ms CSS fade, and the
+  // fall toast was still visible over the menu in post-quit screenshots:
+  // its opacity must read 0 immediately after quit, with no wait.
+  const toastOpacity = await page.evaluate(() => getComputedStyle(document.getElementById('hud-toast')).opacity);
+  if (toastOpacity !== '0') throw new Error(`toast must be fully hidden the moment the menu opens, opacity is ${toastOpacity}`);
   const timerCleared = await page.evaluate(() => window.__spire.info().endTimerPending);
   if (timerCleared) throw new Error('quitToMenu should clear the pending endClimb timer');
   await page.waitForTimeout(1500);
   const afterQuit = await page.evaluate(() => window.__spire.info());
   if (afterQuit.phase !== 'menu') throw new Error(`after quitting inside the loss window the phase should be menu, got ${afterQuit.phase}`);
   if (await page.isVisible('#gameover')) throw new Error('game-over panel opened over the menu after quitting inside the loss window');
+  // The menu hint must not invite Play on a locked climb: after quitting
+  // from deep-linked climb 12, the hint names the lock.
+  const menuHint = await page.textContent('#menu-hint');
+  if (!/locked/i.test(menuHint || '')) throw new Error(`menu hint should name the lock for climb 12, got: ${menuHint}`);
   console.log('render-check: endClimb race fixed — quitting inside the 600ms loss window leaves the menu clean (timer cleared, no game-over panel)');
 
   if (errors.length > 0) {
