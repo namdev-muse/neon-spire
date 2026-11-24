@@ -1,5 +1,24 @@
 # Neon Spire — devlog
 
+## v1.0.0 — M6 release (milestone run, Tue 2026-11-24 23:30 +07)
+
+Release-only milestone: the version bump 0.5.0 → 1.0.0, README + screenshots refresh, and final verification. **No game-code changes from the playtested v0.5.0** — physics, climbs, feel, and UI are byte-identical to the build that earned its live FUN playtest GO at M5, so this release ships the exact game that was playtested, not a new build.
+
+- Version bumped in `physics.js` (`VERSION`), `game.js` / test headers, `package.json`, README, and the render-check's version assertion. No other code touched.
+- README updated for v1.0.0 (version section + known-issues heading); the climb table, controls, and tech sections are unchanged and still accurate. Screenshots in `docs/screenshots/` refreshed from the v1.0.0 size sweep (menu / gameplay / endless at 1280×720).
+- Final verification on the v1.0.0 tree before push: smoke **102/102 PASS**, bot gates **all pass** (decision clears 12/12, 11.77→60.48s, 0 falls; hold / no-input / random lose all 12; endless decision 355.9m on seed 20261124), render check **PASS** (zero console/page errors; autopilot clears climb 1 live in 23.28s, 2 falls; Endless autopilot 25.5m, banks 25m; rank "A" badge on climb 1; endClimb race regression still green), size sweep **PASS** — 14 shots inspected by eye (menu / settings / gameplay / pause at 1280×720, 2560×1080, 1080×2340, plus Endless and climb-5 framing). Climb-5 framing holds after the M5 fix (spire near-vertical, three rings in frame). Portrait keeps the known large vertical empty bands; the HUD wraps to two lines in the pills at 1080×2340 with no clipping or overlap.
+- Live FUN playtest of the pushed v1.0.0 (final full playthrough, real browser) — see the M6 run log.
+- Firefox on a real machine remains unverified (the VM's Playwright Firefox cannot create a WebGL context at all — environment limit, not a game defect; the game shows a graceful message when WebGL is missing). Music/SFX never had a human-ear check. The live playtester never completed a ring-to-ring transfer under tap/drag-only input (tooling ceiling); transfer evidence is sim bot + live autopilot + CI harness, as in M1–M5.
+
+### Carried (unchanged from M5)
+
+- Portrait framing leaves large vertical empty bands above/below the action.
+- Music/SFX have not had a human-ear check yet.
+- At a wide swing the frame still angles slightly (cosmetic).
+- Climb 10 and 11 sit within 0.1s of each other on the decision bot's clock (58.17s vs 58.27s).
+- Endless Ascent's 100m+ heights are sim-bot evidence only (355.9m on seed 20261124).
+- The live autopilot clear in the render check took 2 falls (slow-frame timing); the sim bot clears with 0 falls.
+
 ## v0.5.0 — M5 polish & robustness (milestone run, Tue 2026-11-24 21:30 +07)
 
 A polish pass over the M1–M4 carries — no new climbs, no new modes, no physics changes, no climb-data changes. Every fix is small and surgical.
