@@ -1,5 +1,6 @@
-// Neon Spire v0.4.0 — size sweep: menu + gameplay screenshots at
-// 1280x720, 2560x1080 and 1080x2340, for inspection by eye.
+// Neon Spire v0.5.0 — size sweep: menu + settings + gameplay + pause
+// screenshots at 1280x720, 2560x1080 and 1080x2340, plus a climb-5
+// framing shot and an Endless Ascent shot, for inspection by eye.
 // Same serving + Three.js-fulfilment setup as tests/render-check.js.
 // Run: node tests/screenshots.js
 import fs from 'node:fs';
@@ -85,12 +86,26 @@ try {
     await page.waitForTimeout(1500);
     await page.screenshot({ path: path.join(SHOTS_DIR, `menu-${size.name}.png`), timeout: 60000 });
     console.log(`screenshots: menu-${size.name}.png saved`);
+    // M5: the Settings panel at this size (empty area / perf line).
+    await page.click('#btn-settings');
+    await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: path.join(SHOTS_DIR, `settings-${size.name}.png`), timeout: 60000 });
+    console.log(`screenshots: settings-${size.name}.png saved`);
+    await page.click('#btn-settings-close');
+    await page.waitForFunction(() => document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
     await page.click('#btn-play');
     await page.waitForFunction(() => window.__spire.phase === 'playing', null, { timeout: 5000 });
     await page.evaluate(() => window.__spire.autopilot(true));
     await page.waitForTimeout(4000);
     await page.screenshot({ path: path.join(SHOTS_DIR, `gameplay-${size.name}.png`), timeout: 60000 });
     console.log(`screenshots: gameplay-${size.name}.png saved`);
+    // M5: the pause screen at this size.
+    await page.keyboard.press('KeyP');
+    await page.waitForFunction(() => window.__spire.phase === 'paused', null, { timeout: 5000 });
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(SHOTS_DIR, `pause-${size.name}.png`), timeout: 60000 });
+    console.log(`screenshots: pause-${size.name}.png saved`);
     await context.close();
   }
   // M4: an Endless Ascent gameplay shot, plus fresh menu/gameplay
@@ -110,6 +125,23 @@ try {
     console.log('screenshots: endless-1280x720.png saved');
     await context.close();
   }
+  // M5: a climb-5 framing shot (Ember Stair, the M3 framing carry)
+  // at the moment the autopilot first reaches 20m.
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, timezoneId: 'Asia/Bangkok', hasTouch: true });
+    const page = await context.newPage();
+    page.on('console', (msg) => { if (msg.type() === 'error') errors.push('climb5 console: ' + msg.text()); });
+    page.on('pageerror', (err) => errors.push('climb5 pageerror: ' + String(err)));
+    await page.route(THREE_URL, (route) => route.fulfill({ path: cached }));
+    await page.goto(`http://127.0.0.1:${port}/?climb=5`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForFunction(() => window.__spire && window.__spire.phase === 'playing', null, { timeout: 30000 });
+    await page.evaluate(() => window.__spire.autopilot(true));
+    await page.waitForFunction(() => window.__spire.info().maxHeight >= 20, null, { timeout: 120000 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'climb5-1280x720.png'), timeout: 60000 });
+    console.log('screenshots: climb5-1280x720.png saved');
+    await context.close();
+  }
   fs.mkdirSync(DOCS_SHOTS_DIR, { recursive: true });
   for (const [src, dst] of [
     ['menu-1280x720.png', 'menu.png'],
@@ -124,7 +156,7 @@ try {
     errors.forEach((e) => console.error('  ' + e));
     process.exitCode = 1;
   } else {
-    console.log(`screenshots: done — 7 shots in ${SHOTS_DIR} (menu/gameplay/endless copied to docs/screenshots/), zero console/page errors. INSPECT BY EYE.`);
+    console.log(`screenshots: done — 14 shots in ${SHOTS_DIR} (menu/gameplay/endless copied to docs/screenshots/), zero console/page errors. INSPECT BY EYE.`);
   }
 } catch (err) {
   console.error('screenshots: FAIL —', err.message);

@@ -1,4 +1,4 @@
-// Neon Spire v0.4.0 — headless browser render check.
+// Neon Spire v0.5.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless
 // browser, and asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract demo
@@ -25,6 +25,12 @@
 //     contrast) and restore cleanly
 //   - ?climb=3 reaches climb 3 and ?climb=12 reaches climb 12 (public unlock/seed path — Apex lesson)
 //   - the canvas pixels actually change during a run
+//   - M5 polish: the FPS guard is present and steps the render
+//     scale down on demand; the HUD height is the PEAK height; the
+//     HUD groups have pill backdrops; quitting inside the 600ms
+//     loss window does not open game-over over the menu (endClimb
+//     setTimeout race); the Settings panel shows a live
+//     performance readout
 //   - zero console errors and zero page errors, and a WebGL context exists
 //
 // Run: node tests/render-check.js
@@ -137,8 +143,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__spire.version);
-  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.4.0');
+  if (version !== '0.5.0') throw new Error(`expected version 0.5.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.5.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -150,11 +156,27 @@ try {
   if (!gl) throw new Error('no WebGL context on the game canvas');
   console.log(`render-check: WebGL context live (${gl.width}x${gl.height} canvas)`);
 
+  // M5: the FPS guard is present (rolling FPS average, one-way DPR
+  // ladder 2 → 1.5 → 1 + reduced particle spawn). The manual trigger
+  // steps the cap down one rung and the renderer keeps working.
+  const guard0 = await page.evaluate(() => window.__spire.info().fpsGuard);
+  if (!guard0 || ![2, 1.5, 1].includes(guard0.dprCap)) throw new Error(`FPS guard state missing or bad dprCap: ${JSON.stringify(guard0)}`);
+  if (!(guard0.pixelRatio >= 1 && guard0.pixelRatio <= 2)) throw new Error(`FPS guard pixel ratio out of range: ${guard0.pixelRatio}`);
+  if (!(guard0.particleScale > 0 && guard0.particleScale <= 1)) throw new Error(`FPS guard particle scale out of range: ${guard0.particleScale}`);
+  await page.evaluate(() => window.__spire.triggerFpsGuard());
+  const guard1 = await page.evaluate(() => window.__spire.info().fpsGuard);
+  if (guard1.dprCap > guard0.dprCap) throw new Error(`triggerFpsGuard must not raise the cap (${guard0.dprCap} -> ${guard1.dprCap})`);
+  if (guard0.dprCap > 1 && guard1.dprCap >= guard0.dprCap) throw new Error(`triggerFpsGuard should step the cap down (${guard0.dprCap} -> ${guard1.dprCap})`);
+  if (guard1.particleScale > guard0.particleScale) throw new Error('FPS guard should reduce particle spawn when stepping down');
+  const fpsVal = await page.evaluate(() => window.__spire.info().fps);
+  if (!Number.isFinite(fpsVal) || fpsVal < 0) throw new Error(`FPS guard should report a sane fps, got ${fpsVal}`);
+  console.log(`render-check: FPS guard present (dprCap ${guard0.dprCap} -> ${guard1.dprCap}, pixelRatio ${guard1.pixelRatio}, particleScale ${guard1.particleScale}, fps ${fpsVal})`);
+
   // The menu: title, one primary Play, 12 climb cards, NO version/engine
   // text anywhere the player can see. Climb 1 unlocked, climb 2 locked.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON SPIRE')) throw new Error('menu title missing');
-  if (menuText.includes('v0.4.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.5.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -186,6 +208,10 @@ try {
   await page.check('#reduce-flashing');
   const flashOff = await page.evaluate(() => window.__spire.state.flash);
   if (flashOff !== false) throw new Error('reduce-flashing should turn state.flash off');
+  // M5: the Settings panel shows a live performance readout (fps +
+  // FPS-guard render scale) — real state, not empty space.
+  const perfLine = await page.textContent('#perf-line');
+  if (!/^Performance: \d+ fps · render scale [\d.]+×/.test(perfLine.trim())) throw new Error(`settings performance line wrong: ${perfLine}`);
   await page.selectOption('#text-size-select', '1.2');
   const fsLarge = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
   if (!(fsLarge > 16)) throw new Error(`text size Large should grow the root font, got ${fsLarge}px`);
@@ -227,6 +253,14 @@ try {
   if (!await page.isVisible('#hud')) throw new Error('HUD not visible after PLAY');
   const hudClimb = await page.textContent('#hud-climb');
   if (!hudClimb.includes('First Light')) throw new Error(`expected climb 1 First Light, got: ${hudClimb}`);
+  // M5: the HUD height is the PEAK height ("Peak Xm / Ym" on climbs),
+  // and each HUD group has a pill backdrop so it reads over the neon.
+  const hudHeight = await page.textContent('#hud-height');
+  if (!/^Peak \d+m \/ 60m$/.test(hudHeight.trim())) throw new Error(`climb HUD height should be a peak height, got: ${hudHeight}`);
+  const hudBg = await page.evaluate(() => getComputedStyle(document.querySelector('.hud-left')).backgroundColor);
+  if (!hudBg || hudBg === 'rgba(0, 0, 0, 0)' || hudBg === 'transparent') throw new Error(`HUD groups should have a pill backdrop, .hud-left background is ${hudBg}`);
+  const hudMidBg = await page.evaluate(() => getComputedStyle(document.querySelector('.hud-mid')).backgroundColor);
+  if (!hudMidBg || hudMidBg === 'rgba(0, 0, 0, 0)' || hudMidBg === 'transparent') throw new Error(`HUD groups should have a pill backdrop, .hud-mid background is ${hudMidBg}`);
   const startInfo = await page.evaluate(() => window.__spire.info());
   if (startInfo.attached !== 0) throw new Error(`climber should start latched to ring 0, got attached=${startInfo.attached}`);
   console.log('render-check: PLAY starts climb 1 (First Light), HUD visible, climber latched to ring 0');
@@ -406,7 +440,7 @@ try {
   const endlessHudClimb = await page.textContent('#hud-climb');
   if (!endlessHudClimb.includes('Endless Ascent')) throw new Error(`endless HUD should name the mode, got: ${endlessHudClimb}`);
   const endlessHudHeight = await page.textContent('#hud-height');
-  if (!/^Height \d+m$/.test(endlessHudHeight.trim())) throw new Error(`endless HUD height should be a bare height, got: ${endlessHudHeight}`);
+  if (!/^Peak \d+m$/.test(endlessHudHeight.trim())) throw new Error(`endless HUD height should be a bare peak height, got: ${endlessHudHeight}`);
   console.log('render-check: Endless Ascent starts from the menu button (HUD names the mode, climber latched to ring 0)');
   await page.evaluate(() => window.__spire.autopilot(true));
   await page.waitForFunction(() => {
@@ -477,6 +511,10 @@ try {
   if (!await page.isVisible('#gameover')) throw new Error('game-over screen not visible after the forced loss on climb 12');
   const overText = await page.textContent('#gameover-detail');
   if (overText.includes('-1m')) throw new Error(`game-over height must not go negative, got: ${overText}`);
+  // M5: the game-over detail is a sentence in normal-size text, not
+  // the 1.6rem big-score class — the dialog layout stays stable.
+  const overDetailSize = await page.evaluate(() => parseFloat(getComputedStyle(document.getElementById('gameover-detail')).fontSize));
+  if (overDetailSize > 20) throw new Error(`game-over detail should be normal text size, got ${overDetailSize}px`);
   const toastHidden = await page.evaluate(() => !document.getElementById('hud-toast').classList.contains('show'));
   if (!toastHidden) throw new Error('fall toast must be cleared when the run ends');
   await page.click('#btn-retry');
@@ -484,6 +522,24 @@ try {
   const retryInfo = await page.evaluate(() => window.__spire.info());
   if (retryInfo.climbId !== 12 || retryInfo.falls !== 0) throw new Error(`Try Again should restart climb 12 fresh, got ${JSON.stringify({ id: retryInfo.climbId, falls: retryInfo.falls })}`);
   console.log('render-check: Try Again restarts a deep-linked locked climb (retry bypasses the menu lock); game-over height non-negative, toast cleared');
+
+  // M5 regression: the endClimb setTimeout race. Losing a climb
+  // schedules endClimb 600ms later; quitting to the menu inside that
+  // window must cancel the timer — the game-over panel must not open
+  // over the menu. Before the fix the pending timeout fired after
+  // quitToMenu and opened #gameover on top of the menu.
+  await page.evaluate(() => { window.__spire.run.falls = 4; });
+  await page.waitForFunction(() => window.__spire.run && window.__spire.run.phase === 'lost', null, { timeout: 60000, polling: 50 });
+  const timerPending = await page.evaluate(() => window.__spire.info().endTimerPending);
+  if (!timerPending) throw new Error('expected a pending endClimb timer right after the loss');
+  await page.evaluate(() => window.__spire.quitToMenu());
+  const timerCleared = await page.evaluate(() => window.__spire.info().endTimerPending);
+  if (timerCleared) throw new Error('quitToMenu should clear the pending endClimb timer');
+  await page.waitForTimeout(1500);
+  const afterQuit = await page.evaluate(() => window.__spire.info());
+  if (afterQuit.phase !== 'menu') throw new Error(`after quitting inside the loss window the phase should be menu, got ${afterQuit.phase}`);
+  if (await page.isVisible('#gameover')) throw new Error('game-over panel opened over the menu after quitting inside the loss window');
+  console.log('render-check: endClimb race fixed — quitting inside the 600ms loss window leaves the menu clean (timer cleared, no game-over panel)');
 
   if (errors.length > 0) {
     console.error('render-check: console/page errors seen:');

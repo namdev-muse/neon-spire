@@ -1,4 +1,4 @@
-// Neon Spire v0.4.0 — bot harness gates.
+// Neon Spire v0.5.0 — bot harness gates.
 // The decision bot must clear every climb with real latch/pump/release
 // timing; the bots that must lose (hold grapple forever, no input, random)
 // must lose on every climb. If a hold-one-button bot clears a climb,
