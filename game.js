@@ -1,4 +1,4 @@
-// Neon Spire v0.4.0 — Three.js renderer + menus + game feel.
+// Neon Spire v0.5.0 — Three.js renderer + menus + game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns the
 // 3D scene, the screen stack, input, Web Audio SFX and the feel tiers.
 // The climber swings on the climb-face plane (x = lateral, y = height,
@@ -62,6 +62,7 @@ const state = {
   gameoverShownAt: 0,
   endless: false, // an Endless Ascent run is in progress
   endlessSeed: 0,
+  endTimer: null, // pending setTimeout(() => endClimb(...)) after a win/loss — cleared on quit / new run (M5 race fix)
 };
 const screenStack = []; // screen ids, top = last
 
@@ -199,6 +200,26 @@ function stopMusic() {
 }
 
 // ---------------------------------------------------------------- three
+// M5 FPS guard (Surge pattern, adapted): a rolling FPS average; if the
+// frame rate stays under 28fps for 2s, step the renderer pixel ratio
+// down (2 → 1.5 → 1) and reduce particle spawn. One-way only — never
+// oscillates back up mid-run. Antialiasing is fixed at creation and is
+// never touched; physics is never touched.
+let fpsEma = 60;
+let fpsLowT = 0;
+let dprCap = 2;
+let particleScale = 1;
+function stepFpsGuard() {
+  // One step down the ladder; a second call steps again.
+  if (dprCap > 1.5) { dprCap = 1.5; particleScale = 0.6; }
+  else if (dprCap > 1) { dprCap = 1; particleScale = 0.35; }
+  else return;
+  fpsLowT = 0;
+  if (renderer) {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, dprCap));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+}
 const container = document.getElementById('game-container');
 let renderer = null;
 let webglOK = true;
@@ -276,7 +297,8 @@ function spawnParticles(x, y, z, colorHex, count, speed = 6) {
   const c = new THREE.Color(colorHex);
   const pos = pGeo.attributes.position.array;
   const col = pGeo.attributes.color.array;
-  for (let i = 0; i < count; i++) {
+  const n = Math.max(1, Math.round(count * particleScale));
+  for (let i = 0; i < n; i++) {
     const idx = pCursor;
     pCursor = (pCursor + 1) % P_MAX;
     const p = pool[idx];
@@ -425,7 +447,7 @@ function buildClimbScene(climb) {
 }
 
 if (renderer) {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, dprCap));
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
 }
@@ -547,9 +569,11 @@ function updateHUD() {
   const endless = !!c.endless;
   $('hud-climb').textContent = endless ? 'Endless Ascent' : `Climb ${c.id} — ${c.name}`;
   $('hud-time').textContent = fmtTime(run.time);
+  // The HUD height is the PEAK height reached this run (maxHeight),
+  // not the current height — label it honestly (M5).
   $('hud-height').textContent = endless
-    ? `Height ${Math.max(0, Math.floor(run.maxHeight))}m`
-    : `Height ${Math.max(0, Math.floor(run.maxHeight))}m / ${c.height}m`;
+    ? `Peak ${Math.max(0, Math.floor(run.maxHeight))}m`
+    : `Peak ${Math.max(0, Math.floor(run.maxHeight))}m / ${c.height}m`;
   $('hud-score').textContent = `Score ${run.score}`;
   $('hud-orbs').textContent = `Orbs ${run.orbs}/${c.orbs.length}`;
   $('hud-falls').textContent = `Falls ${run.falls}/${5}`;
@@ -638,6 +662,9 @@ function bankEndlessBest() {
 function beginRun(run, toastText, srText) {
   ensureAudio();
   startMusic();
+  // A new run cancels any pending end-of-run timer from the previous
+  // one — its endClimb must never fire into this run.
+  if (state.endTimer !== null) { clearTimeout(state.endTimer); state.endTimer = null; }
   state.run = run;
   state.phase = 'playing';
   state.autopilot = false;
@@ -692,7 +719,12 @@ function restartRun() {
 }
 function endClimb(won) {
   const run = state.run;
-  if (!run) return;
+  // Race guard (M5): if the player quit to the menu inside the
+  // 600/900ms window between the run ending and this timer firing,
+  // the panel must not open over the menu. quitToMenu clears the
+  // timer, so this also covers a timer that was never cleared.
+  if (!run || state.phase === 'menu') return;
+  state.endTimer = null;
   // Clear transient UI state on run end (Talon lesson): a leftover
   // toast must not linger over the complete / game-over panel.
   toastEl.classList.remove('show');
@@ -755,6 +787,9 @@ function resumeGame() {
 }
 function quitToMenu() {
   toastEl.classList.remove('show');
+  // Cancel any pending end-of-run timer: its endClimb must not fire
+  // over the menu (M5 race fix — the 600ms loss window).
+  if (state.endTimer !== null) { clearTimeout(state.endTimer); state.endTimer = null; }
   // Banking first: quitting mid-run still keeps the endless height.
   bankEndlessBest();
   // Snap every feel effect back to its exact rest value (skill rule):
@@ -874,7 +909,19 @@ $('btn-play').addEventListener('click', () => startClimb(state.climbId));
 $('btn-endless').addEventListener('click', () => startEndless());
 $('btn-howto').addEventListener('click', () => openScreen('howto'));
 $('btn-howto-close').addEventListener('click', () => closeScreen('howto'));
-$('btn-settings').addEventListener('click', () => openScreen('settings'));
+// Read-only performance readout for the Settings panel (M5): the
+// live frame rate and the FPS guard's render scale, so the panel
+// shows real state instead of empty space. Refreshed while Settings
+// is open; the guard steps the scale down only when frames stay slow.
+let perfLineT = 0;
+function updatePerfLine() {
+  const el = $('perf-line');
+  if (!el) return;
+  const pr = renderer ? renderer.getPixelRatio().toFixed(1) : '—';
+  const stepped = dprCap < 2 ? ' — guard reduced render scale for smooth play' : '';
+  el.textContent = `Performance: ${Math.round(fpsEma)} fps · render scale ${pr}×${stepped}`;
+}
+$('btn-settings').addEventListener('click', () => { updatePerfLine(); openScreen('settings'); });
 $('btn-settings-close').addEventListener('click', () => closeScreen('settings'));
 $('btn-mute-menu').addEventListener('click', toggleMute);
 $('btn-mute-hud').addEventListener('click', toggleMute);
@@ -985,9 +1032,9 @@ function handleEvents(run, isDemo) {
   if (run.phase !== prevPhase) {
     if (run.phase === 'won' && !isDemo) {
       fireFeedback('summit', run.pos.x, run.pos.y, FACE_Z);
-      setTimeout(() => endClimb(true), 900);
+      state.endTimer = setTimeout(() => endClimb(true), 900);
     } else if (run.phase === 'lost' && !isDemo) {
-      setTimeout(() => endClimb(false), 600);
+      state.endTimer = setTimeout(() => endClimb(false), 600);
     } else if (run.phase !== 'climbing' && isDemo) {
       state.demoRun = createRun(CLIMBS[0]);
       prevLatches = 0; prevReleases = 0; prevOrbs = 0; prevFalls = 0;
@@ -1087,10 +1134,16 @@ function syncScene(run, tSec, dtReal) {
     m.position.y = m.userData.baseY + Math.sin(tSec * 2 + m.userData.phase) * 0.3;
   });
   // Camera: chase from behind and below, looking up the spire.
+  // The look target tracks the camera's own lateral factor (0.55),
+  // not the climber's (0.8): looking toward the climber tilted the
+  // spire diagonally across the frame (M5 A/B: the spire leaned ~25°
+  // and the route above the climber left the frame). With the look
+  // target on the camera axis the spire reads as a tower and the
+  // rings above stay in frame, while the climber still reads clearly.
   const px = run.pos.x;
   const py = run.pos.y;
   camTarget.set(px * 0.55, py - 2.5, 23);
-  camLook.set(px * 0.8, py + 5.5, FACE_Z);
+  camLook.set(px * 0.55, py + 5.5, FACE_Z);
   // Latch snap: for a beat after a latch the camera locks onto the new
   // anchor much harder than the usual soft follow.
   const snap = state.camSnapT > 0;
@@ -1118,6 +1171,20 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dtReal = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
+  // FPS guard: rolling average; sustained <28fps for 2s steps the
+  // pixel ratio (and particle spawn) down one rung.
+  if (dtReal > 0) fpsEma = fpsEma * 0.95 + (1 / Math.max(dtReal, 1e-4)) * 0.05;
+  if (fpsEma > 0 && fpsEma < 28) {
+    fpsLowT += dtReal;
+    if (fpsLowT > 2 && dprCap > 1) stepFpsGuard();
+  } else {
+    fpsLowT = 0;
+  }
+  // Refresh the Settings performance readout while it is open.
+  if (!$('settings').classList.contains('hidden')) {
+    perfLineT += dtReal;
+    if (perfLineT > 1) { perfLineT = 0; updatePerfLine(); }
+  }
   const tSec = now / 1000;
   if (state.phase !== 'paused') stepActive(dtReal);
   if (state.toastT > 0) {
@@ -1182,6 +1249,13 @@ function info() {
     fov: +camera.fov.toFixed(1),
     autopilot: state.autopilot,
     unlocked: save.unlocked,
+    endTimerPending: state.endTimer !== null,
+    fps: Math.round(fpsEma),
+    fpsGuard: {
+      dprCap,
+      pixelRatio: renderer ? +renderer.getPixelRatio().toFixed(2) : 0,
+      particleScale,
+    },
   };
 }
 window.__spire = {
@@ -1201,6 +1275,10 @@ window.__spire = {
   resume: resumeGame,
   quitToMenu,
   setMuted(m) { if (!!m !== state.muted) toggleMute(); },
+  // M5: runs the same one-way FPS-guard step the frame loop takes
+  // after 2s under 28fps (drops the DPR cap one rung and resizes).
+  triggerFpsGuard() { stepFpsGuard(); return dprCap; },
+  get dprCap() { return dprCap; },
   setShake(p) { state.shakePct = p; },
   setFlash(b) { state.flash = !!b; },
   grapple(down) { input.grapple = !!down; },

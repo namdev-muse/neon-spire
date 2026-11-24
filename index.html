@@ -27,7 +27,7 @@
     <span id="hud-best" class="hud-best">Best —</span>
   </div>
   <div class="hud-mid">
-    <span id="hud-height">Height 0m</span>
+    <span id="hud-height">Peak 0m</span>
     <span id="hud-score">Score 0</span>
     <span id="hud-orbs">Orbs 0/4</span>
     <span id="hud-falls">Falls 0</span>
@@ -88,9 +88,9 @@
     </ul>
     <h3>Controls</h3>
     <ul class="howto-list">
-      <li>Hold Space / mouse button: grapple &middot; A / D or Left / Right: pump the swing &middot; Release Space: let go</li>
+      <li>Hold Space / mouse button: grapple &middot; drag mouse left/right: pump &middot; A / D or Left / Right: pump the swing &middot; Release Space: let go</li>
       <li>P: pause &middot; M: mute &middot; R: restart</li>
-      <li>Touch: hold GRAPPLE, tap &#9664; / &#9654; to pump</li>
+      <li>Touch: hold GRAPPLE, hold &#9664; / &#9654; to pump</li>
       <li>Esc closes a panel &middot; Enter confirms on menus</li>
     </ul>
     <button id="btn-howto-close" class="btn primary" type="button">Got it</button>
@@ -128,6 +128,7 @@
     <label class="toggle-row">High contrast
       <input id="high-contrast-toggle" type="checkbox" aria-label="High contrast — brighter text and panels">
     </label>
+    <p id="perf-line" class="perf-line">Performance: —</p>
     <button id="btn-settings-close" class="btn primary" type="button">Back to Menu</button>
   </div>
 </div>
@@ -151,7 +152,7 @@
 <div id="gameover" class="overlay hidden">
   <div class="panel">
     <h2>Climb Lost</h2>
-    <p id="gameover-detail" class="big-score"></p>
+    <p id="gameover-detail" class="gameover-detail"></p>
     <p id="gameover-best" class="complete-best"></p>
     <button id="btn-retry" class="btn primary" type="button">Try Again</button>
     <button id="btn-menu-over" class="btn" type="button">Main Menu</button>

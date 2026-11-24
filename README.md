@@ -39,9 +39,9 @@ You hang from a grapple rope on the face of a towering neon spire. There is no c
 
 ## Controls
 
-- Hold **Space** / mouse button: grapple · **A / D** or **Left / Right**: pump the swing · Release **Space**: let go
+- Hold **Space** / mouse button: grapple · drag mouse left/right: pump · **A / D** or **Left / Right**: pump the swing · Release **Space**: let go
 - **P**: pause · **M**: mute · **R**: restart
-- Touch: hold **GRAPPLE**, tap **◀ / ▶** to pump
+- Touch: hold **GRAPPLE**, hold **◀ / ▶** to pump
 - **Esc** closes a panel · **Enter** confirms on menus
 
 ## Tech
@@ -49,16 +49,17 @@ You hang from a grapple rope on the face of a towering neon spire. There is no c
 - Three.js 0.160.0 (pinned, jsdelivr import map), vanilla HTML/CSS/JS, Web Audio API synth SFX, no build step, GitHub Pages from `main` / root.
 - Pure simulation core in `physics.js` (no DOM, no Three.js) — deterministic fixed-step pendulum sim, driven through public input hooks by the bot harness.
 - Game feel: trauma screen shake (real-time decay), hit-stop, FOV punch + latch dip, latch camera snap, summit slow-mo, pooled particles, score pops, swing-energy meter + rope glow + pitch-rising pump ticks, synth SFX + generative music (Am–F–C–G bass + arpeggio that climbs with you).
-- Tests: `npm test` (smoke 102 + bot gates), `npm run render-check` (headless Chromium: menu, demo, accessibility toggles, screen-space pump, pump feedback ticks + swing meter, music active, release/re-latch, autopilot clear, fall/respawn, pause, shake, rest state, Endless Ascent menu + autopilot + banked best + `?endless=` deep links, rank badge on the climb card, `?climb=` unlock path incl. climb 12), `npm run screenshots` (1280x720 / 2560x1080 / 1080x2340, inspected by eye; refreshes `docs/screenshots/`).
+- Tests: `npm test` (smoke 102 + bot gates), `npm run render-check` (headless Chromium: menu, demo, accessibility toggles, screen-space pump, pump feedback ticks + swing meter, music active, release/re-latch, autopilot clear, fall/respawn, pause, shake, rest state, Endless Ascent menu + autopilot + banked best + `?endless=` deep links, rank badge on the climb card, `?climb=` unlock path incl. climb 12, M5: FPS guard + Peak height label + HUD pill backdrops + endClimb race regression + settings performance line), `npm run screenshots` (1280x720 / 2560x1080 / 1080x2340, menu + settings + gameplay + pause + climb-5 framing, inspected by eye; refreshes `docs/screenshots/`).
 
 ## Version
 
-v0.4.0 (M4 progression & depth: Endless Ascent mode + per-climb clear ranks, saved and shown). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
+v0.5.0 (M5 polish & robustness: endClimb race fix, HUD pill backdrops, Peak height label, game-over dialog fix, FPS guard, camera framing fix, settings performance line, How to Play wording). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
 
-## Known issues (M4)
+## Known issues (M5)
 
-- Portrait framing leaves large vertical empty bands above/below the action (same caveat class as Apex/Bastion) — M5 item.
+- Portrait framing leaves large vertical empty bands above/below the action (same caveat class as Apex/Bastion) — carried to M6.
 - The live autopilot clear in the render check took 2 falls (slow-frame timing); the sim bot clears with 0 falls.
 - Music/SFX have not had a human-ear check yet (render check proves the scheduler runs and the music is active after Play).
 - Climb 10 and 11 sit within 0.1s of each other on the decision bot's clock (58.17s vs 58.27s) — the curve is monotonic but the margin there is thin; a human will feel climb 11 as harder through its wider reversals and taller gaps, but the bot-time gap is small.
 - Endless Ascent's live autopilot climb is verified to 25m in the render check; the 100m+ heights are sim-bot evidence only (the bot reaches 355.9m on seed 20261124 in simulation).
+- At a wide swing the frame still angles slightly — the M5 camera fix straightened the spire (look target now tracks the camera axis), but a climber swung far off the spire axis still tilts the view a few degrees; cosmetic.
