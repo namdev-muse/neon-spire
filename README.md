@@ -18,13 +18,22 @@ You hang from a grapple rope on the face of a towering neon spire. There is no c
 - Fall below your last checkpoint and you drop back to it. **5 falls** ends the climb. Latch the **gold summit ring** to clear the climb.
 - Your **best score** is saved per climb. Clearing a climb unlocks the next one. Ranks: **S** (no falls, under par), **A** (under par), **B** (cleared).
 
-## Climbs (M1: 3)
+## Climbs (M2: 12)
 
 | # | Climb | Height | Par |
 |---|-------|--------|-----|
 | 1 | First Light | 60m | 45s |
 | 2 | Crosswind | 84m | 60s |
 | 3 | Vortex Crown | 102m | 75s |
+| 4 | Verdant Rise | 118m | 100s |
+| 5 | Ember Stair | 124m | 130s |
+| 6 | Rose Circuit | 150m | 135s |
+| 7 | Tideglass | 159m | 165s |
+| 8 | Azure Spiral | 176m | 175s |
+| 9 | Crimson Gate | 186m | 185s |
+| 10 | Golden Helix | 196m | 205s |
+| 11 | Frost Veil | 206m | 205s |
+| 12 | Void Crown | 216m | 210s |
 
 ## Controls
 
@@ -38,14 +47,15 @@ You hang from a grapple rope on the face of a towering neon spire. There is no c
 - Three.js 0.160.0 (pinned, jsdelivr import map), vanilla HTML/CSS/JS, Web Audio API synth SFX, no build step, GitHub Pages from `main` / root.
 - Pure simulation core in `physics.js` (no DOM, no Three.js) — deterministic fixed-step pendulum sim, driven through public input hooks by the bot harness.
 - Game feel: trauma screen shake (real-time decay), hit-stop, FOV punch, summit slow-mo, pooled particles, score pops, synth SFX + ambient pad.
-- Tests: `npm test` (smoke 65 + bot gates), `npm run render-check` (headless Chromium: menu, demo, screen-space pump, release/re-latch, autopilot clear, fall/respawn, pause, shake, rest state, `?climb=` unlock path), `npm run screenshots` (1280x720 / 2560x1080 / 1080x2340, inspected by eye).
+- Tests: `npm test` (smoke 65 + bot gates), `npm run render-check` (headless Chromium: menu, demo, screen-space pump, release/re-latch, autopilot clear, fall/respawn, pause, shake, rest state, `?climb=` unlock path incl. climb 12), `npm run screenshots` (1280x720 / 2560x1080 / 1080x2340, inspected by eye).
 
 ## Version
 
-v0.1.0 (M1 core). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
+v0.2.0 (M2 climb craft). See [docs/DEVLOG.md](docs/DEVLOG.md) for the sprint log.
 
-## Known issues (M1)
+## Known issues (M2)
 
 - Portrait framing leaves large vertical empty bands above/below the action (same caveat class as Apex/Bastion) — M5 item.
 - The live autopilot clear in the render check took 2 falls (slow-frame timing); the sim bot clears with 0 falls.
 - Music/SFX have not had a human-ear check yet (render check proves the scheduler runs).
+- Climb 10 and 11 sit within 0.1s of each other on the decision bot's clock (58.17s vs 58.27s) — the curve is monotonic but the margin there is thin; a human will feel climb 11 as harder through its wider reversals and taller gaps, but the bot-time gap is small.

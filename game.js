@@ -1,4 +1,4 @@
-// Neon Spire v0.1.0 — Three.js renderer + menus + game feel.
+// Neon Spire v0.2.0 — Three.js renderer + menus + game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns the
 // 3D scene, the screen stack, input, Web Audio SFX and the feel tiers.
 // The climber swings on the climb-face plane (x = lateral, y = height,
@@ -452,7 +452,7 @@ function updateMenuBest() {
   const done = Object.keys(save.best).length;
   $('menu-best').textContent = done > 0
     ? `${done} climb${done > 1 ? 's' : ''} cleared — best score ${Math.max(...Object.values(save.best).map((b) => b.score))} pts`
-    : 'Three climbs await. The first ring is right above you.';
+    : `${CLIMBS.length} climbs await. The first ring is right above you.`;
   $('menu-hint').textContent = `Climb ${state.climbId} selected — press Play.`;
 }
 function fmtTime(t) {
