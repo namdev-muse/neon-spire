@@ -1,5 +1,27 @@
 # Neon Spire — devlog
 
+## v0.4.0 — M4 progression & depth (milestone run, Tue 2026-11-24 19:30 +07)
+
+Two systems, both complete: a second mode and per-climb ranks.
+
+- **Endless Ascent.** A seeded, scaling, never-ending climb from a secondary menu button (`btn-endless`, Play stays the one primary action). `generateEndlessClimb(seed)` in physics builds ~120 rings deterministically from `mulberry32`: ring(0,2) checkpoint, gaps growing ~9.5m low to ~11.5m high, lateral offsets alternating ±(3–6)m growing slightly, a checkpoint every 7–9 rings, orbs every ~3 rings offset from the ring line, and NO summit ring — an endless climb never wins, it only ends on 5 falls. Best height + score + seed saved in `save.endlessBest` (save version stays 1, key stays `neon-spire-save-v1`), shown under the button ("Endless best: 87m" / "Endless Ascent — no run yet"). Default seed is today's date as YYYYMMDD; `?endless=1` starts today, `?endless=<digits>` starts that seed. The HUD names the mode and shows a bare `Height Xm` (no total — there is no summit); quitting from pause banks the best height first, and the game-over panel shows height reached, "New best!" and the best height. R / pause-Restart / Try Again restart the same endless seed. One real bug found by the smoke suite while building this: `recordBest` replaced the saved entry on a better score *before* reading the saved rank, so a better-score A clear wiped an earlier S — fixed by capturing the rank first.
+- **Per-climb clear ranks, saved and visible.** `rankFor` already existed but the rank was never stored and never shown on the cards. `recordBest` now tracks the best rank ever achieved per climb (S > A > B) independently of the score: a better rank upgrades the saved rank even on a lower-score clear, a worse rank never downgrades it. The complete screen shows the rank, the saved best rank, and "New best rank!" on improvement; climb cards show a rank badge (gold S, cyan A, violet B) next to the best score; the menu best line counts S-ranks.
+- **Balance gate (fixed seed 20261124, physics untouched).** Decision bot 355.9m (100m reached in 22.8s sim time, worst single-ring dwell 7.4s, 0 falls); hold bot 4.5m; random bot 1.6m, lost. The first generator draft was too wide (diagonals to 18.3m, bot stalled to 144m in 400s) — tuned the generator only (gap 9.5→11.3m, lateral 3–6.5m), never the physics constants; the 12 hand-crafted climbs' bot times are unchanged (11.77→60.48s).
+
+### Test totals
+
+- Smoke: **102/102 PASS** (was 72; +30: endless generation ×9, endless bots ×4, rank persistence ×9, endless best ×8).
+- Bot gates: **all pass** — decision clears 12/12 (11.77→60.48s, 0 falls), hold/none/random lose all 12, curve unchanged; endless gates pass (decision 355.9m, hold 4.5m, random 1.6m).
+- Render check (headless Chromium): **PASS** — everything M3 asserted, plus Endless Ascent is a secondary menu action with the best line, autopilot climbs Endless Ascent live to 25.5m, quitting banks the best (25m) and the menu shows it, `?endless=20261124` and `?endless=1` deep-link correctly, the climb-1 card shows rank badge "A" after the live clear (autopilot 23.28s, 2 falls under slow frames), zero console/page errors.
+- Size sweep: **PASS** — 1280x720, 2560x1080, 1080x2340, menu + gameplay at each size, plus a new Endless Ascent gameplay shot; all 7 shots inspected by eye, `docs/screenshots/` refreshed (menu.png, gameplay.png, endless.png). Portrait menu fits with the known large vertical empty bands (M5 item).
+
+### Carried to M5
+
+- Portrait framing leaves large vertical empty bands (M5 item).
+- Music/SFX never had a human-ear check.
+- Endless Ascent's live autopilot climb is verified to 25m in the render check; the 100m+ heights are sim-bot evidence only.
+- The endClimb setTimeout race (quit within 600ms of losing opens game-over over the menu) is still open — M5 item, deliberately untouched.
+
 ## v0.3.0 — M3 feel & juice (milestone run, Tue 2026-11-24 17:30 +07)
 
 A traversal/feedback pass over the whole swing loop — no new climbs, no new modes, just making the existing game feel like a game.
